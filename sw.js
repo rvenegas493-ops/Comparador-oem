@@ -8,7 +8,7 @@
 //   historial viven en localStorage, no en Cache Storage, y no se tocan.
 //
 // Al cambiar cualquier archivo de la app, incrementar VERSION.
-const VERSION = "comparador-v1.3.0";
+const VERSION = "comparador-v1.3.1";
 const PREFIJO = "comparador-";
 
 const RECURSOS = [

@@ -12,7 +12,7 @@ import {
   iaDisponible, resumenEnvio, consultarIA,
 } from "./ia-cliente.js";
 
-const VERSION = "1.3.0";
+const VERSION = "1.3.1";
 const RUTA_REGISTRO_IA = "ejemplo/documentos-demo/documentos.json";
 let registroIA = null;
 const CLAVE_AJUSTES = "comparador.adaptador";
@@ -371,6 +371,7 @@ function montarBloqueIA(r) {
     <div class="tarjeta">
       <p class="ayuda">La IA solo explica diferencias que tienen documentación citada. Toda explicación requiere validación técnica humana.</p>
       <p id="ia-estado" class="ayuda" role="status"></p>
+      <label class="casilla-demo"><input id="ia-demo" type="checkbox"> Autorizo esta prueba de IA y confirmo que solo se usarán datos sintéticos (parámetros DEMO_).</label>
       <button id="btn-ia" type="button" class="primario">Explicar diferencias con IA</button>
       <div id="ia-resultado"></div>
     </div>`;
@@ -378,7 +379,9 @@ function montarBloqueIA(r) {
 
   const config = leerConfiguracionIA();
   const disponible = iaDisponible(config, navigator.onLine);
-  $("#btn-ia").disabled = !disponible;
+  const actualizarBoton = () => { $("#btn-ia").disabled = !(disponible && $("#ia-demo").checked); };
+  $("#ia-demo").addEventListener("change", actualizarBoton);
+  actualizarBoton();
   $("#ia-estado").textContent = disponible
     ? "Servicio configurado. Antes de enviar se le mostrará exactamente qué información se enviará."
     : config.url
@@ -410,7 +413,19 @@ async function explicarConIA(r) {
     return;
   }
 
-  const { items, noDeterminables } = construirSolicitud(r.resultado, registro);
+  if (!$("#ia-demo").checked) {
+    salida.innerHTML = '<p class="error">Marque la casilla de autorización para usar la IA en modo demostración.</p>';
+    return;
+  }
+  // Modo demostración: solo parámetros sintéticos (DEMO_). Lo demás no se envía.
+  const construida = construirSolicitud(r.resultado, registro);
+  const items = construida.items.filter((it) => it.nombre.startsWith("DEMO_"));
+  const noDeterminables = [
+    ...construida.noDeterminables,
+    ...construida.items
+      .filter((it) => !it.nombre.startsWith("DEMO_"))
+      .map((it) => ({ nombre: it.nombre, motivo: "fuera del modo demostración: solo se envían parámetros sintéticos DEMO_" })),
+  ];
   if (items.length === 0) {
     salida.innerHTML = `<div class="tarjeta"><p class="ayuda">No hay diferencias de valor con documentación en el registro. No se envió nada.</p>
       ${noDeterminables.length ? `<ul class="lista">${noDeterminables.map((n) => `<li>${esc(n.nombre)}: ${esc(n.motivo)}</li>`).join("")}</ul>` : ""}</div>`;
@@ -426,7 +441,7 @@ async function explicarConIA(r) {
 
   boton.disabled = true;
   salida.innerHTML = '<p class="ayuda">Consultando el servicio…</p>';
-  const resp = await consultarIA({ solicitud, items, registro, config });
+  const resp = await consultarIA({ solicitud, items, registro, config, modoDemo: true });
   boton.disabled = false;
   if (!resp.ok) {
     salida.innerHTML = `<div class="error">${esc(resp.error)}</div>`;
@@ -443,7 +458,11 @@ function renderIA(resp, noDeterminables, r) {
     ...resp.items.filter((i) => i.estado !== "validada").map((i) => ({ nombre: i.nombre, motivo: i.motivo })),
   ];
 
+  const etiqueta = resp.modo === "demostracion"
+    ? `<div class="aviso-demo" role="note"><strong>MODO DEMOSTRACIÓN</strong> · prueba técnica con datos sintéticos. No es una función de producción ni sirve para diagnóstico.</div>`
+    : "";
   return `
+    ${etiqueta}
     <div class="ia-bloque comprobado">
       <h3>Datos comprobados por el comparador</h3>
       <p class="ayuda">Obtenidos directamente de los archivos. No son interpretación.</p>

@@ -419,3 +419,25 @@ button.peligro { border-color: var(--rojo); color: var(--rojo); }
 }
 #btn-ia { width: 100%; min-height: 48px; }
 #btn-ia:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Etiqueta visible de modo demostración (prueba con datos sintéticos). */
+.aviso-demo {
+  border: 2px dashed var(--ambar);
+  background: var(--ambar-fondo);
+  color: var(--texto);
+  border-radius: var(--radio);
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+
+.casilla-demo {
+  display: block;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 2px solid var(--ambar);
+  border-radius: var(--radio);
+  background: var(--ambar-fondo);
+  font-weight: 600;
+  min-height: 48px;
+}
+.casilla-demo input { width: 22px; height: 22px; margin-right: 8px; vertical-align: middle; }
