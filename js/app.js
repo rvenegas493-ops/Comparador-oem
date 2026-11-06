@@ -3,10 +3,11 @@
 // y del diccionario de ejemplo, ambos servidos desde la caché del service worker.
 import { procesar, crearAdaptador, ADAPTADOR_POR_DEFECTO, LecturaError, ConfigError } from "./motor.js";
 import { mdToHtml, htmlDocumento } from "./markdown.js";
+import { construirResumen } from "./resumen.js";
 import { inspeccionar, reporteEstructural, LEYENDA_INSPECCION } from "./inspeccion.js";
 import { ejecutarSimulacion, LEYENDA_SIMULACION, EXPLICACION_DEMOSTRATIVA } from "./simulacion.js";
 
-const VERSION = "1.1.1";
+const VERSION = "1.2.0";
 const CLAVE_AJUSTES = "comparador.adaptador";
 const CLAVE_HISTORIAL = "comparador.historial";
 const MAX_HISTORIAL = 30;
@@ -189,6 +190,47 @@ function valorConUnidad(p) {
   return esc(valor) + (p.unidad ? ` <span class="ayuda">${esc(p.unidad)}</span>` : "");
 }
 
+function renderResumenHTML(res) {
+  const filas = [
+    ["Motor", res.motor],
+    ["ECM", res.ecm],
+    ["Calibración A", res.calibracionA],
+    ["Calibración B", res.calibracionB],
+    ["Software A", res.softwareA],
+    ["Software B", res.softwareB],
+  ];
+  const hallazgos = res.hallazgos.length
+    ? res.hallazgos.map((h) => `<li class="hallazgo ${esc(h.tipo)}">${esc(h.texto)}</li>`).join("")
+    : '<li class="hallazgo">No se encontraron diferencias entre parámetros comparables.</li>';
+  return `
+    <div class="banner-no-verificado" role="status">
+      <strong>Compatibilidad: NO VERIFICADA</strong>
+      <p>Esta herramienta no determina compatibilidad entre calibraciones. Solo el fabricante puede confirmarla.</p>
+    </div>
+
+    <h2>Resumen del análisis</h2>
+    <div class="tarjeta">
+      <div class="datos-resumen">
+        ${filas.map(([e, v]) => `<div class="dato"><span class="meta">${esc(e)}</span><b>${esc(v)}</b></div>`).join("")}
+      </div>
+    </div>
+
+    <div class="resumen">
+      ${kpi(res.diferencias, "diferencias de valor")}
+      ${kpi(res.noComparables, "no comparables")}
+      ${kpi(res.revision, "requieren revisión")}
+      ${kpi(res.errores, "errores de lectura")}
+    </div>
+
+    <h2>Hallazgos principales</h2>
+    <p class="ayuda">Descripción de los resultados del software. No indican cuál configuración es correcta.</p>
+    <ul class="hallazgos">${hallazgos}</ul>
+
+    <div class="ia-nota">${res.iaEjecutada
+      ? ""
+      : "No se ejecutó ningún modelo de IA en este análisis. Los hallazgos los genera el software a partir de los resultados, no una IA."}</div>`;
+}
+
 function renderResultados(r, entrada, destino = "#resultados", sufijo = "") {
   const { resultado, definiciones } = r;
   const emisiones =
@@ -234,47 +276,50 @@ function renderResultados(r, entrada, destino = "#resultados", sufijo = "") {
     ? `<ul class="lista">${resultado.errores.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>`
     : '<p class="ayuda">Sin errores de lectura.</p>';
 
+  const res = construirResumen(resultado);
   $(destino).innerHTML = `
-    <div class="banner-no-verificado" role="status">
-      <strong>Compatibilidad: NO VERIFICADA</strong>
-      <p>Esta herramienta no determina compatibilidad entre calibraciones. Solo el fabricante puede confirmarla.</p>
-    </div>
-
-    <div class="resumen">
-      ${kpi(resultado.valores.length, "diferencias de valor")}
-      ${kpi(resultado.noComparables.length, "no comparables")}
-      ${kpi(emisiones, "revisión de emisiones")}
-      ${kpi(resultado.errores.length, "errores de lectura")}
-    </div>
-
-    <h2>1. Identificación</h2>
-    <div class="tarjeta">${identificacion}</div>
-
-    <h2>2. Diferencias de valores</h2>
-    ${valores}
-
-    <h2>3. Datos no comparables</h2>
-    ${noComp}
-
-    <h2>4. Revisión humana obligatoria (emisiones)</h2>
-    <p class="ayuda">Estos parámetros requieren revisión por personal calificado. La herramienta no interpreta su efecto.</p>
-
-    <h2>5. Documentación utilizada</h2>
-    <div class="tarjeta">${documentacion}</div>
-
-    <h2>6. Errores de lectura y trazabilidad</h2>
-    <div class="tarjeta">${errores}</div>
-
-    <h2>7. Interpretación asistida por IA</h2>
-    <div class="ia-nota">No disponible en esta versión. La interpretación asistida requiere un servicio autorizado que aún no está configurado. No se muestra ninguna explicación generada.</div>
+    ${renderResumenHTML(res)}
 
     <div class="fila-botones">
       <button id="dl-md${sufijo}" type="button" class="secundario">Descargar Markdown</button>
       <button id="dl-html${sufijo}" type="button" class="secundario">Descargar HTML</button>
     </div>
-    <p class="pie">A: ${esc(entrada.a.nombre)} · SHA-256 ${esc(entrada.a.sha256)}<br>
-      B: ${esc(entrada.b.nombre)} · SHA-256 ${esc(entrada.b.sha256)}<br>
-      Diccionario: ${esc(entrada.d.nombre)} · SHA-256 ${esc(entrada.d.sha256)}</p>`;
+
+    <details class="detalles-tecnicos">
+      <summary>Detalles técnicos: tablas completas, SHA-256 y trazabilidad</summary>
+      <div class="detalles-cuerpo">
+        <div class="resumen">
+          ${kpi(resultado.valores.length, "diferencias de valor")}
+          ${kpi(resultado.noComparables.length, "no comparables")}
+          ${kpi(emisiones, "revisión de emisiones")}
+          ${kpi(resultado.errores.length, "errores de lectura")}
+        </div>
+
+        <h2>1. Identificación</h2>
+        <div class="tarjeta">${identificacion}</div>
+
+        <h2>2. Diferencias de valores</h2>
+        ${valores}
+
+        <h2>3. Datos no comparables</h2>
+        ${noComp}
+
+        <h2>4. Revisión humana obligatoria (emisiones)</h2>
+        <p class="ayuda">Estos parámetros requieren revisión por personal calificado. La herramienta no interpreta su efecto.</p>
+
+        <h2>5. Documentación utilizada</h2>
+        <div class="tarjeta">${documentacion}</div>
+
+        <h2>6. Errores de lectura y trazabilidad</h2>
+        <div class="tarjeta">${errores}</div>
+
+        <h2>7. Interpretación asistida por IA</h2>
+        <div class="ia-nota">No disponible en esta versión. La interpretación asistida requiere un servicio autorizado que aún no está configurado. No se muestra ninguna explicación generada.</div>
+        <p class="pie">A: ${esc(entrada.a.nombre)} · SHA-256 ${esc(entrada.a.sha256)}<br>
+          B: ${esc(entrada.b.nombre)} · SHA-256 ${esc(entrada.b.sha256)}<br>
+          Diccionario: ${esc(entrada.d.nombre)} · SHA-256 ${esc(entrada.d.sha256)}</p>
+      </div>
+    </details>`;
 
   const nombreBase = `reporte_${entrada.fecha.slice(0, 19).replace(/[:T]/g, "-")}`;
   $(`#dl-md${sufijo}`).addEventListener("click", () => descargar(`${nombreBase}.md`, entrada.markdown, "text/markdown"));
