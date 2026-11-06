@@ -6,7 +6,7 @@ import { mdToHtml, htmlDocumento } from "./markdown.js";
 import { inspeccionar, reporteEstructural, LEYENDA_INSPECCION } from "./inspeccion.js";
 import { ejecutarSimulacion, LEYENDA_SIMULACION, EXPLICACION_DEMOSTRATIVA } from "./simulacion.js";
 
-const VERSION = "1.1.0";
+const VERSION = "1.1.1";
 const CLAVE_AJUSTES = "comparador.adaptador";
 const CLAVE_HISTORIAL = "comparador.historial";
 const MAX_HISTORIAL = 30;
