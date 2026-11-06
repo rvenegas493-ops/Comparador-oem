@@ -11,7 +11,7 @@ import {
   leerConfiguracionIA, guardarConfiguracionIA, borrarConfiguracionIA,
   iaDisponible, resumenEnvio, consultarIA,
 } from "./ia-cliente.js";
-import { crearAlmacenHistorial, ErrorCuota, ErrorDatos, ESTADO, estadoDe, CLAVE_LEGADO, CLAVE_V2 } from "./historial.js";
+import { crearAlmacenHistorial, ErrorCuota, ErrorEscritura, ErrorDatos, ESTADO, estadoDe, CLAVE_LEGADO, CLAVE_V2 } from "./historial.js";
 
 const VERSION = "1.4.0";
 const RUTA_REGISTRO_IA = "ejemplo/documentos-demo/documentos.json";
@@ -504,7 +504,8 @@ function descargar(nombre, contenido, tipo) {
 
 // ---------- Historial local (estados: activo / archivado) ----------
 // La lógica de almacenamiento está en historial.js. Aquí solo se muestra y se confirma.
-// Ninguna acción de esta pantalla borra registros: solo archivar y restaurar.
+// Ninguna acción de esta pantalla borra registros: solo archivar, restaurar y exportar.
+// Cada registro se gestiona por su clave, así que un identificador repetido nunca afecta a otros.
 
 let almacenHistorialInstancia = null;
 const historial = () => {
@@ -515,13 +516,12 @@ const historial = () => {
 };
 
 let filtroHistorial = "activos"; // "activos" | "archivados" | "todos"
-const seleccion = new Set();
-let pendiente = null; // { ids, estado } esperando confirmación tras la vista previa
-let ultimaLista = [];
-let ultimasVisibles = [];
+const seleccion = new Set();     // claves de registro
+let pendiente = null;            // { claves, estado } esperando confirmación
+let ultimosRegistros = [];       // registros válidos del último render
+let ultimasVisibles = [];        // claves visibles del último render
 const ETIQUETAS_FILTRO = { activos: "Activos", archivados: "Archivados", todos: "Todos" };
 
-const esComparacionValida = (e) => Boolean(e) && typeof e === "object" && typeof e.id === "string";
 const estaArchivada = (e) => estadoDe(e) === ESTADO.ARCHIVADO;
 const fechaLegible = (iso) => {
   const d = new Date(iso);
@@ -530,12 +530,15 @@ const fechaLegible = (iso) => {
 
 function mensajeFalloGuardado(err) {
   if (err instanceof ErrorCuota) {
-    return "No se guardó esta comparación en el historial: el almacenamiento de este navegador está lleno. El reporte sigue disponible para descargar abajo. Archive comparaciones antiguas en la pestaña Historial para liberar espacio.";
+    return "No se guardó esta comparación en el historial: el almacenamiento de este navegador está lleno. El reporte sigue disponible para descargar abajo. Archive comparaciones o exporte una copia para liberar espacio.";
+  }
+  if (err instanceof ErrorEscritura) {
+    return `No se guardó esta comparación. ${err.message} El reporte sigue disponible para descargar abajo.`;
   }
   if (err instanceof ErrorDatos) {
     return "No se guardó esta comparación: el historial existente no se pudo leer y se protege sin modificarlo. El reporte sigue disponible para descargar abajo.";
   }
-  return "No se guardó esta comparación por un fallo de escritura. El historial anterior se conserva. El reporte sigue disponible para descargar abajo.";
+  return "No se guardó esta comparación por un fallo inesperado. El historial anterior se conserva. El reporte sigue disponible para descargar abajo.";
 }
 
 // Devuelve null si se guardó, o el mensaje que debe ver el técnico.
@@ -568,24 +571,30 @@ async function renderHistorial() {
     return;
   }
 
-  const todas = estado.entradas
-    .filter(esComparacionValida)
-    .sort((a, b) => String(b.fecha ?? "").localeCompare(String(a.fecha ?? "")));
-  ultimaLista = todas;
+  const registros = estado.registros
+    .filter((r) => r.clave !== null)
+    .sort((a, b) => String(b.entrada.fecha ?? "").localeCompare(String(a.entrada.fecha ?? "")));
+  ultimosRegistros = registros;
   const cuentas = {
-    activos: todas.filter((e) => !estaArchivada(e)).length,
-    archivados: todas.filter(estaArchivada).length,
-    todos: todas.length,
+    activos: registros.filter((r) => !estaArchivada(r.entrada)).length,
+    archivados: registros.filter((r) => estaArchivada(r.entrada)).length,
+    todos: registros.length,
   };
-  const visibles = todas.filter((e) =>
-    filtroHistorial === "todos" || (filtroHistorial === "archivados") === estaArchivada(e));
-  ultimasVisibles = visibles.map((e) => e.id);
-  for (const id of [...seleccion]) if (!ultimasVisibles.includes(id)) seleccion.delete(id);
+  const visibles = registros.filter((r) =>
+    filtroHistorial === "todos" || (filtroHistorial === "archivados") === estaArchivada(r.entrada));
+  ultimasVisibles = visibles.map((r) => r.clave);
+  for (const clave of [...seleccion]) if (!ultimasVisibles.includes(clave)) seleccion.delete(clave);
 
-  const avisos = [];
-  if (estado.aviso) avisos.push(`<div class="alerta-historial" role="alert">${esc(estado.aviso)}</div>`);
-  if (!historial().bloqueoActivo) {
-    avisos.push('<p class="ayuda">Este navegador no admite bloqueo entre pestañas. Guarde o archive desde una sola pestaña de la aplicación.</p>');
+  const avisos = estado.avisos.map((m) => `<div class="alerta-historial" role="alert">${esc(m)}</div>`);
+  if (estado.modoGarantia !== "web-locks") {
+    avisos.push(`<p class="ayuda">${estado.modoGarantia === "presencia"
+      ? "Este navegador no admite bloqueo entre pestañas. Guarde o archive desde una sola pestaña de la aplicación."
+      : "Este navegador no permite guardar el historial de forma segura. Puede consultarlo y exportarlo."}</p>`);
+  }
+  const uso = historial().uso();
+  if (uso?.supera) {
+    const mb = (uso.bytes / (1024 * 1024)).toFixed(1);
+    avisos.push(`<div class="alerta-historial" role="status">El historial de este navegador ocupa aproximadamente ${mb} MB. Puede archivar lo que ya no necesite o exportar una copia. Nada se borra automáticamente.</div>`);
   }
 
   const filtros = Object.entries(ETIQUETAS_FILTRO).map(([clave, texto]) =>
@@ -593,10 +602,10 @@ async function renderHistorial() {
   ).join("");
 
   const filas = visibles.length
-    ? visibles.map((h) => `
+    ? visibles.map(({ clave, entrada: h }) => `
       <div class="fila-historial">
-        <input type="checkbox" data-sel="${esc(h.id)}" aria-label="Seleccionar ${esc(h.a?.nombre ?? "")} contra ${esc(h.b?.nombre ?? "")}" ${seleccion.has(h.id) ? "checked" : ""}>
-        <button class="item-historial" type="button" data-id="${esc(h.id)}">
+        <input type="checkbox" data-sel="${esc(clave)}" aria-label="Seleccionar ${esc(h.a?.nombre ?? "")} contra ${esc(h.b?.nombre ?? "")}" ${seleccion.has(clave) ? "checked" : ""}>
+        <button class="item-historial" type="button" data-id="${esc(clave)}">
           ${esc(h.a?.nombre ?? "")} vs ${esc(h.b?.nombre ?? "")}${estaArchivada(h) ? ' <span class="etiqueta-archivado">Archivado</span>' : ""}
           <small>${esc(fechaLegible(h.fecha))} · ${esc(h.cambios ?? 0)} cambios · ${esc(h.errores ?? 0)} errores${h.simulacion ? " · simulación" : ""}</small>
         </button>
@@ -616,9 +625,9 @@ async function renderHistorial() {
 
   let previa = "";
   if (pendiente) {
-    const cambian = todas.filter((e) => pendiente.ids.includes(e.id) && estadoDe(e) !== pendiente.estado);
+    const cambian = registros.filter((r) => pendiente.claves.includes(r.clave) && estadoDe(r.entrada) !== pendiente.estado);
     const accionTexto = pendiente.estado === ESTADO.ARCHIVADO ? "archivar" : "restaurar";
-    const nombres = cambian.slice(0, 10).map((e) => `<li>${esc(e.a?.nombre ?? "")} vs ${esc(e.b?.nombre ?? "")}</li>`).join("");
+    const nombres = cambian.slice(0, 10).map(({ entrada: e }) => `<li>${esc(e.a?.nombre ?? "")} vs ${esc(e.b?.nombre ?? "")}</li>`).join("");
     const resto = cambian.length > 10 ? `<li>… y ${cambian.length - 10} más</li>` : "";
     previa = `
       <div class="vista-previa" role="region" aria-label="Vista previa de la operación">
@@ -639,19 +648,19 @@ async function renderHistorial() {
     ${filas}`;
 }
 
-function prepararCambio(ids, estado) {
-  if (!ids.length) return;
-  pendiente = { ids: [...ids], estado };
+function prepararCambio(claves, estado) {
+  if (!claves.length) return;
+  pendiente = { claves: [...claves], estado };
   renderHistorial();
 }
 
 async function confirmarCambio() {
   if (!pendiente) return;
-  const { ids, estado } = pendiente;
+  const { claves, estado } = pendiente;
   pendiente = null;
   try {
-    const r = await historial().cambiarEstado(ids, estado);
-    for (const id of r.cambiados) seleccion.delete(id);
+    const r = await historial().cambiarEstado(claves, estado);
+    for (const clave of r.cambiados) seleccion.delete(clave);
     const verbo = estado === ESTADO.ARCHIVADO ? "archivada(s)" : "restaurada(s)";
     const extra = r.noEncontrados.length ? ` ${r.noEncontrados.length} no se encontró(aron) y no se modificó(aron).` : "";
     mensajeHistorial(`${r.cambiados.length} comparación(es) ${verbo}. Nada se borró.${extra}`);
@@ -661,17 +670,29 @@ async function confirmarCambio() {
   await renderHistorial();
 }
 
+async function exportarHistorial() {
+  try {
+    const json = await historial().exportar();
+    const fecha = new Date().toISOString().slice(0, 10);
+    descargar(`historial-comparador-${fecha}.json`, json, "application/json");
+    mensajeHistorial("Copia exportada. El historial no se modificó.");
+  } catch (err) {
+    mensajeHistorial(`No se pudo exportar el historial: ${err.message}`, true);
+  }
+}
+
 function accionHistorial(accion) {
   if (accion === "seleccionar-visibles") {
-    for (const id of ultimasVisibles) seleccion.add(id);
+    for (const clave of ultimasVisibles) seleccion.add(clave);
     pendiente = null;
     return renderHistorial();
   }
   if (accion === "archivar") return prepararCambio([...seleccion], ESTADO.ARCHIVADO);
   if (accion === "restaurar") return prepararCambio([...seleccion], ESTADO.ACTIVO);
   if (accion === "archivar-todo") {
-    return prepararCambio(ultimaLista.filter((e) => !estaArchivada(e)).map((e) => e.id), ESTADO.ARCHIVADO);
+    return prepararCambio(ultimosRegistros.filter((r) => !estaArchivada(r.entrada)).map((r) => r.clave), ESTADO.ARCHIVADO);
   }
+  if (accion === "exportar") return exportarHistorial();
   if (accion === "confirmar") return confirmarCambio();
   if (accion === "cancelar") {
     pendiente = null;
@@ -679,10 +700,11 @@ function accionHistorial(accion) {
   }
 }
 
-async function verHistorial(id) {
+async function verHistorial(clave) {
   let h;
   try {
-    h = (await historial().leer()).entradas.find((x) => esComparacionValida(x) && x.id === id);
+    const r = (await historial().leer()).registros.find((x) => x.clave === clave);
+    h = r?.entrada;
   } catch (err) {
     mensajeHistorial(`No se pudo abrir la comparación: ${err.message}`, true);
     return;
@@ -703,7 +725,7 @@ async function verHistorial(id) {
   $("#hist-estado").addEventListener("click", async () => {
     // Acción individual y reversible: no requiere vista previa.
     try {
-      await historial().cambiarEstado([id], archivada ? ESTADO.ACTIVO : ESTADO.ARCHIVADO);
+      await historial().cambiarEstado([clave], archivada ? ESTADO.ACTIVO : ESTADO.ARCHIVADO);
       mensajeHistorial(archivada ? "Comparación restaurada a Activos." : "Comparación archivada. Puede restaurarla desde Archivados. Nada se borró.");
       $("#detalle-historial").innerHTML = "";
       await renderHistorial();

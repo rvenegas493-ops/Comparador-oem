@@ -1,0 +1,13 @@
+{
+  "name": "comparador-oem",
+  "version": "1.4.0",
+  "private": true,
+  "description": "Comparador OEM: PWA sin servidor para comparar exportaciones de configuración ECM",
+  "scripts": {
+    "test": "node --test tests/js/*.test.mjs",
+    "test:e2e:historial": "python3 tests/e2e/prueba_historial_ciclo.py"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

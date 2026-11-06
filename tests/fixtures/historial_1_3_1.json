@@ -1,0 +1,42 @@
+[
+  {
+    "id": "1762435300000-11ab",
+    "fecha": "2026-11-05T12:00:00.000Z",
+    "a": {
+      "nombre": "export_a.csv",
+      "sha256": "a3b52d088203f4b70bbb0bebf856dcc308eef2cd8f9e1efbcb347a855e41be21"
+    },
+    "b": {
+      "nombre": "export_b.csv",
+      "sha256": "bdeca19f03ff14382efd22ec501d969f2f67255ee6b910fc738328e10580a091"
+    },
+    "d": {
+      "nombre": "diccionario.csv (ejemplo)",
+      "sha256": "20cd1b0dae9b79663eb573a0b04e2a07eaf97983e9eef6ba38a00a1bc84c8b76"
+    },
+    "cambios": 5,
+    "noComparables": 0,
+    "errores": 0,
+    "markdown": "# Reporte de comparación de configuraciones (solo lectura)\n\n## Procedencia\n\n| Entrada | Archivo | SHA-256 |\n|---|---|---|\n| Exportación A | export_a.csv | a3b52d088203f4b70bbb0bebf856dcc308eef2cd8f9e1efbcb347a855e41be21 |\n| Exportación B | export_b.csv | bdeca19f03ff14382efd22ec501d969f2f67255ee6b910fc738328e10580a091 |\n| Diccionario | diccionario.csv (ejemplo) | 20cd1b0dae9b79663eb573a0b04e2a07eaf97983e9eef6ba38a00a1bc84c8b76 |\n\nConfiguración del adaptador: `{'delimitador': ',', 'codificacion': 'utf-8-sig', 'col_tipo': 'tipo', 'col_nombre': 'nombre', 'col_valor': 'valor', 'col_unidad': 'unidad', 'tipo_meta': 'meta', 'tipo_param': 'param'}`\n\n## 1. Identificación\n\nDiferencias de identificación del ECM. Son hechos leídos de los archivos, no un juicio de compatibilidad.\n\n| Campo | A | B | Estado | Origen A / B |\n|---|---|---|---|---|\n| ecm_id | ECM-EJEMPLO-001 | ECM-EJEMPLO-001 | igual | export_a.csv:2 / export_b.csv:2 |\n| engine | MOTOR-EJEMPLO-X | MOTOR-EJEMPLO-X | igual | export_a.csv:3 / export_b.csv:3 |\n| cal_id | CAL-0001 | CAL-0002 | distinto | export_a.csv:4 / export_b.csv:4 |\n| sw_version | 1.0.0 | 1.0.1 | distinto | export_a.csv:5 / export_b.csv:5 |\n\n## 2. Diferencias de valores\n\n| Parámetro | Estado | Valor A | Valor B | Unidad | Definición | Origen A / B |\n|---|---|---|---|---|---|---|\n| DEF_TASA_DOSIFICACION_EJEMPLO | cambiado | 12 | 14 | mg/s | con definición documentada | export_a.csv:8 / export_b.csv:8 |\n| PARAM_NUEVO | agregado | — | 3 | — | con definición documentada | — / export_b.csv:10 |\n| PARAM_RALENTI | cambiado | 750 | 800 | rpm | con definición documentada | export_a.csv:6 / export_b.csv:6 |\n| PARAM_RETIRADO | eliminado | 1 | — | — | con definición documentada | export_a.csv:10 / — |\n| PARAM_VALOR_SIN_DEFINICION | cambiado | 5 | 7 | — | sin definición documentada | export_a.csv:9 / export_b.csv:9 |\n\n## 3. Datos no comparables\n\nEstos parámetros no se comparan porque sus datos no permiten una comparación confiable.\n\nNinguno.\n\n## 4. Parámetros para revisión humana obligatoria\n\nRequieren revisión por personal calificado. La herramienta no interpreta su efecto.\n\n- `DEF_TASA_DOSIFICACION_EJEMPLO` (valor)\n\n## 5. Compatibilidad\n\n**Estado: no verificada.**\n\nEsta herramienta no determina compatibilidad entre calibraciones. Solo el fabricante puede confirmarla. Un reporte sin diferencias tampoco implica compatibilidad.\n\n## 6. Errores de lectura\n\nSin errores de lectura.\n\n## 7. Documentación utilizada\n\nParámetros con diferencias y definición documentada. Las definiciones provienen del diccionario de entrada; esta herramienta no verifica su autenticidad.\n\n| Parámetro | Fuente |\n|---|---|\n| DEF_TASA_DOSIFICACION_EJEMPLO | Documento ficticio de ejemplo §3 |\n| PARAM_NUEVO | Documento ficticio de ejemplo §5 |\n| PARAM_RALENTI | Documento ficticio de ejemplo §1 |\n| PARAM_RETIRADO | Documento ficticio de ejemplo §4 |\n\n## 8. Interpretación asistida por IA (no verificada)\n\n> Interpretación generada por IA a partir únicamente de la definición documentada citada. No está verificada por el motor de comparación y no determina efecto, compatibilidad ni cumplimiento. Use la fuente técnica original para cualquier decisión.\n\nNo se solicitó interpretación asistida por IA.\n"
+  },
+  {
+    "id": "1762435301000-12ab",
+    "fecha": "2026-11-05T12:01:00.000Z",
+    "a": {
+      "nombre": "export_a.csv",
+      "sha256": "a3b52d088203f4b70bbb0bebf856dcc308eef2cd8f9e1efbcb347a855e41be21"
+    },
+    "b": {
+      "nombre": "export_b.csv",
+      "sha256": "bdeca19f03ff14382efd22ec501d969f2f67255ee6b910fc738328e10580a091"
+    },
+    "d": {
+      "nombre": "diccionario.csv (ejemplo)",
+      "sha256": "20cd1b0dae9b79663eb573a0b04e2a07eaf97983e9eef6ba38a00a1bc84c8b76"
+    },
+    "cambios": 5,
+    "noComparables": 0,
+    "errores": 0,
+    "markdown": "# Reporte de comparación de configuraciones (solo lectura)\n\n## Procedencia\n\n| Entrada | Archivo | SHA-256 |\n|---|---|---|\n| Exportación A | export_a.csv | a3b52d088203f4b70bbb0bebf856dcc308eef2cd8f9e1efbcb347a855e41be21 |\n| Exportación B | export_b.csv | bdeca19f03ff14382efd22ec501d969f2f67255ee6b910fc738328e10580a091 |\n| Diccionario | diccionario.csv (ejemplo) | 20cd1b0dae9b79663eb573a0b04e2a07eaf97983e9eef6ba38a00a1bc84c8b76 |\n\nConfiguración del adaptador: `{'delimitador': ',', 'codificacion': 'utf-8-sig', 'col_tipo': 'tipo', 'col_nombre': 'nombre', 'col_valor': 'valor', 'col_unidad': 'unidad', 'tipo_meta': 'meta', 'tipo_param': 'param'}`\n\n## 1. Identificación\n\nDiferencias de identificación del ECM. Son hechos leídos de los archivos, no un juicio de compatibilidad.\n\n| Campo | A | B | Estado | Origen A / B |\n|---|---|---|---|---|\n| ecm_id | ECM-EJEMPLO-001 | ECM-EJEMPLO-001 | igual | export_a.csv:2 / export_b.csv:2 |\n| engine | MOTOR-EJEMPLO-X | MOTOR-EJEMPLO-X | igual | export_a.csv:3 / export_b.csv:3 |\n| cal_id | CAL-0001 | CAL-0002 | distinto | export_a.csv:4 / export_b.csv:4 |\n| sw_version | 1.0.0 | 1.0.1 | distinto | export_a.csv:5 / export_b.csv:5 |\n\n## 2. Diferencias de valores\n\n| Parámetro | Estado | Valor A | Valor B | Unidad | Definición | Origen A / B |\n|---|---|---|---|---|---|---|\n| DEF_TASA_DOSIFICACION_EJEMPLO | cambiado | 12 | 14 | mg/s | con definición documentada | export_a.csv:8 / export_b.csv:8 |\n| PARAM_NUEVO | agregado | — | 3 | — | con definición documentada | — / export_b.csv:10 |\n| PARAM_RALENTI | cambiado | 750 | 800 | rpm | con definición documentada | export_a.csv:6 / export_b.csv:6 |\n| PARAM_RETIRADO | eliminado | 1 | — | — | con definición documentada | export_a.csv:10 / — |\n| PARAM_VALOR_SIN_DEFINICION | cambiado | 5 | 7 | — | sin definición documentada | export_a.csv:9 / export_b.csv:9 |\n\n## 3. Datos no comparables\n\nEstos parámetros no se comparan porque sus datos no permiten una comparación confiable.\n\nNinguno.\n\n## 4. Parámetros para revisión humana obligatoria\n\nRequieren revisión por personal calificado. La herramienta no interpreta su efecto.\n\n- `DEF_TASA_DOSIFICACION_EJEMPLO` (valor)\n\n## 5. Compatibilidad\n\n**Estado: no verificada.**\n\nEsta herramienta no determina compatibilidad entre calibraciones. Solo el fabricante puede confirmarla. Un reporte sin diferencias tampoco implica compatibilidad.\n\n## 6. Errores de lectura\n\nSin errores de lectura.\n\n## 7. Documentación utilizada\n\nParámetros con diferencias y definición documentada. Las definiciones provienen del diccionario de entrada; esta herramienta no verifica su autenticidad.\n\n| Parámetro | Fuente |\n|---|---|\n| DEF_TASA_DOSIFICACION_EJEMPLO | Documento ficticio de ejemplo §3 |\n| PARAM_NUEVO | Documento ficticio de ejemplo §5 |\n| PARAM_RALENTI | Documento ficticio de ejemplo §1 |\n| PARAM_RETIRADO | Documento ficticio de ejemplo §4 |\n\n## 8. Interpretación asistida por IA (no verificada)\n\n> Interpretación generada por IA a partir únicamente de la definición documentada citada. No está verificada por el motor de comparación y no determina efecto, compatibilidad ni cumplimiento. Use la fuente técnica original para cualquier decisión.\n\nNo se solicitó interpretación asistida por IA.\n"
+  }
+]

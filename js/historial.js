@@ -3,19 +3,35 @@
 // Reglas de seguridad (detalladas en docs/HISTORIAL.md):
 // - Ninguna operación borra registros. Archivar y restaurar solo cambian `estado`
 //   y `archivadoEn`. Restaurar quita `archivadoEn`, así que el registro vuelve idéntico.
-// - Las lecturas y escrituras se hacen dentro de un bloqueo exclusivo entre pestañas
-//   (Web Locks). Un contador de revisión en localStorage NO se usa como garantía de atomicidad.
+// - Cada registro se gestiona por su CLAVE, no por su identificador. Si dos registros
+//   comparten `id`, cada uno tiene su propia clave y una operación sobre una clave
+//   nunca afecta a otro registro. Un identificador repetido sin clave no coincide con nada.
+// - Las operaciones se hacen dentro de un bloqueo exclusivo entre pestañas (Web Locks).
+//   Se comprueba antes si el navegador lo admite. Si no lo admite, se usa una alternativa
+//   que detecta otras pestañas abiertas. Ninguna de las dos garantiza atomicidad total.
+//   Sin ninguna de ellas, las escrituras se rechazan.
 // - Cada escritura se verifica releyendo el valor guardado.
-// - Si el formato actual no se puede leer, el historial pasa a solo lectura y no se modifica.
-// - El formato anterior (clave `comparador.historial`, un array JSON de 1.3.0 y 1.3.1)
-//   nunca se borra ni se sobrescribe. Se migra copiando, y luego se fusiona por identificador.
+// - Si el formato actual no se puede leer, el historial pasa a solo lectura.
+// - El formato anterior (clave `comparador.historial`, array JSON de 1.3.0 y 1.3.1)
+//   nunca se borra ni se sobrescribe.
 //
 // Sin dependencias de la interfaz: todo entra por parámetros, para poder probarlo en Node.
 
 export const CLAVE_LEGADO = "comparador.historial";
 export const CLAVE_V2 = "comparador.historial.v2";
-const NOMBRE_BLOQUEO = "comparador.historial";
+export const NOMBRE_BLOQUEO = "comparador.historial";
+export const NOMBRE_PRESENCIA = "comparador.historial.presencia";
+const NOMBRE_SONDA = "comparador.historial.sonda";
 const ESQUEMA = 2;
+const ESPERA_PRESENCIA_MS = 200;
+
+// Aviso de uso: 80 % de 5 MB, un límite típico por origen. Es solo un aviso.
+export const UMBRAL_AVISO_BYTES = 4 * 1024 * 1024;
+
+export const MENSAJE_SIN_GARANTIA =
+  "Este navegador no permite guardar el historial de forma segura: no admite bloqueo entre pestañas ni comunicación entre ellas. Use un navegador actualizado. La comparación no se guardó; el reporte sigue descargable.";
+export const MENSAJE_OTRA_PESTANA =
+  "Hay otra pestaña de la aplicación abierta. Cierre las demás y vuelva a guardar. No se modificó nada.";
 
 export const ESTADO = Object.freeze({ ACTIVO: "active", ARCHIVADO: "archived" });
 
@@ -44,11 +60,68 @@ export const estadoDe = (e) =>
   (e && typeof e === "object" && e.estado === ESTADO.ARCHIVADO ? ESTADO.ARCHIVADO : ESTADO.ACTIVO);
 const normalizar = (e) => (e && typeof e === "object" ? { ...e, estado: ESTADO.ACTIVO } : e);
 
-// Bloqueo entre pestañas. Devuelve null si el navegador no admite Web Locks.
+// Contenido del registro sin el estado. Sirve para comparar y para generar claves.
+export function canonico(e) {
+  const { estado, archivadoEn, ...contenido } = e;
+  return JSON.stringify(contenido);
+}
+
+// Hash de 64 bits (dos FNV-1a de 32 bits). Sirve para claves, no para seguridad.
+function huella(texto) {
+  const fnv = (semilla) => {
+    let h = semilla >>> 0;
+    for (let i = 0; i < texto.length; i++) {
+      h ^= texto.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
+  };
+  return fnv(0x811c9dc5) + fnv(0x9e3779b9);
+}
+
+// Clave estable por registro: identificador + huella del contenido.
+// Archivar o restaurar no cambia el contenido, así que la clave no cambia.
+// Dos registros con el mismo identificador y contenido distinto reciben claves distintas.
+// Dos registros idénticos reciben sufijo de ocurrencia (~2, ~3…) para seguir siendo distintos.
+export function calcularClaves(entradas) {
+  const vistas = new Map();
+  return entradas.map((e) => {
+    if (!objetoConId(e)) return null;
+    const base = `${e.id}~${huella(canonico(e))}`;
+    const n = (vistas.get(base) ?? 0) + 1;
+    vistas.set(base, n);
+    return n === 1 ? base : `${base}~${n}`;
+  });
+}
+
+// Identificadores que aparecen más de una vez, para avisar al técnico.
+export function identificadoresRepetidos(entradas) {
+  const cuenta = new Map();
+  for (const e of entradas) if (objetoConId(e)) cuenta.set(e.id, (cuenta.get(e.id) ?? 0) + 1);
+  return [...cuenta.entries()].filter(([, n]) => n > 1).map(([id]) => id);
+}
+
+// Bloqueo entre pestañas. Devuelve null si el navegador no tiene Web Locks.
 export function bloqueoNavegador(global = globalThis) {
   const locks = global.navigator?.locks;
   if (!locks || typeof locks.request !== "function") return null;
-  return { ejecutar: (fn) => locks.request(NOMBRE_BLOQUEO, { mode: "exclusive" }, fn) };
+  return {
+    // Comprueba que la API responde de verdad, no solo que existe.
+    async probar() {
+      try {
+        await locks.request(NOMBRE_SONDA, { ifAvailable: true }, () => true);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    ejecutar: (fn) => locks.request(NOMBRE_BLOQUEO, { mode: "exclusive" }, fn),
+  };
+}
+
+// Canal de presencia para la alternativa sin Web Locks. Devuelve null si no existe.
+export function canalPresencia(global = globalThis) {
+  return typeof global.BroadcastChannel === "function" ? new global.BroadcastChannel(NOMBRE_PRESENCIA) : null;
 }
 
 function parsearLegado(raw) {
@@ -73,10 +146,51 @@ function parsearV2(raw) {
   return v;
 }
 
-export function crearAlmacenHistorial({ almacen, bloqueo = bloqueoNavegador(), ahora = () => new Date() } = {}) {
+export function crearAlmacenHistorial({
+  almacen,
+  bloqueo = bloqueoNavegador(),
+  canal = canalPresencia(),
+  ahora = () => new Date(),
+} = {}) {
   if (!almacen) throw new Error("Falta el almacenamiento del historial.");
-  const conBloqueo = (fn) => (bloqueo ? bloqueo.ejecutar(fn) : fn());
-  const bloqueoActivo = Boolean(bloqueo);
+
+  // Respuesta a las comprobaciones de otras pestañas (alternativa sin Web Locks).
+  if (canal) {
+    canal.onmessage = (ev) => {
+      if (ev.data?.tipo === "ping") canal.postMessage({ tipo: "pong", id: ev.data.id });
+    };
+  }
+
+  let modoPromesa = null;
+  // "web-locks" | "presencia" | "sin-garantia". Se decide una vez, antes de cualquier operación.
+  function modo() {
+    if (!modoPromesa) {
+      modoPromesa = (async () => {
+        if (bloqueo && await bloqueo.probar()) return "web-locks";
+        if (canal) return "presencia";
+        return "sin-garantia";
+      })();
+    }
+    return modoPromesa;
+  }
+
+  // Alternativa: pregunta a las otras pestañas si hay alguna abierta.
+  function otraPestanaActiva() {
+    if (!canal) return Promise.resolve(false);
+    const id = Math.random().toString(36).slice(2);
+    let encontrada = false;
+    return new Promise((resolver) => {
+      const escuchar = (ev) => {
+        if (ev.data?.tipo === "pong" && ev.data.id === id) encontrada = true;
+      };
+      canal.addEventListener("message", escuchar);
+      canal.postMessage({ tipo: "ping", id });
+      setTimeout(() => {
+        canal.removeEventListener("message", escuchar);
+        resolver(encontrada);
+      }, ESPERA_PRESENCIA_MS);
+    });
+  }
 
   function leerClave(clave) {
     try { return almacen.getItem(clave); } catch {
@@ -85,7 +199,6 @@ export function crearAlmacenHistorial({ almacen, bloqueo = bloqueoNavegador(), a
   }
 
   // Escribe el historial completo en una sola operación y verifica que quedó igual.
-  // Una escritura de localStorage reemplaza el valor entero o no cambia nada.
   function escribir(revAnterior, entradas) {
     const texto = JSON.stringify({ esquema: ESQUEMA, rev: revAnterior + 1, entradas });
     try {
@@ -97,15 +210,19 @@ export function crearAlmacenHistorial({ almacen, bloqueo = bloqueoNavegador(), a
     let verificado = null;
     try { verificado = almacen.getItem(CLAVE_V2); } catch { verificado = null; }
     if (verificado !== texto) {
-      throw new ErrorEscritura("La escritura no se pudo verificar. Es posible que otra pestaña haya cambiado el historial.");
+      throw new ErrorEscritura("La escritura no se pudo verificar. El historial anterior se conserva.");
     }
     return revAnterior + 1;
   }
 
   // Lee el estado actual. Migra el formato anterior o fusiona registros que aparezcan
-  // solo en él (por ejemplo, desde una pestaña 1.3.x que siga abierta).
-  // Debe ejecutarse dentro del bloqueo.
-  function sincronizar() {
+  // solo en él. Debe ejecutarse bajo la protección de la modalidad activa.
+  function sincronizar(permitirEscritura) {
+    const avisos = [];
+    const escribirSiPermitido = (rev, entradas) => {
+      if (!permitirEscritura) throw new ErrorEscritura("Solo lectura en esta pestaña.");
+      return escribir(rev, entradas);
+    };
     const rawV2 = leerClave(CLAVE_V2);
     const rawLegado = leerClave(CLAVE_LEGADO);
 
@@ -114,66 +231,111 @@ export function crearAlmacenHistorial({ almacen, bloqueo = bloqueoNavegador(), a
       try { v2 = parsearV2(rawV2); } catch (e) {
         return {
           modo: "solo-lectura", rev: null, entradas: legadoSeguro(rawLegado),
-          aviso: `${e.message} El historial se muestra sin cambios y no se modificará para protegerlo.`,
+          avisos: [`${e.message} El historial se muestra sin cambios y no se modificará para protegerlo.`],
         };
       }
-      const ids = new Set(v2.entradas.filter(objetoConId).map((e) => e.id));
-      const nuevas = legadoSeguro(rawLegado)
-        .filter((e) => objetoConId(e) && !ids.has(e.id))
-        .map(normalizar);
-      if (nuevas.length === 0) return { modo: "listo", rev: v2.rev, entradas: v2.entradas };
-      const fusion = [...v2.entradas, ...nuevas];
-      try {
-        return { modo: "listo", rev: escribir(v2.rev, fusion), entradas: fusion };
-      } catch (e) {
-        // La fusión no se guardó, pero el formato anterior conserva esos registros.
-        return {
-          modo: "listo", rev: v2.rev, entradas: fusion,
-          aviso: `No se pudo guardar la fusión con el formato anterior (${e.message}). Ningún registro se perdió.`,
-        };
+      // Fusión por contenido: un registro del formato anterior se añade solo si no está ya en v2.
+      const disponibles = new Map();
+      for (const e of v2.entradas.filter(objetoConId)) {
+        const c = canonico(e);
+        disponibles.set(c, (disponibles.get(c) ?? 0) + 1);
       }
+      const nuevas = [];
+      for (const e of legadoSeguro(rawLegado).filter(objetoConId)) {
+        const c = canonico(e);
+        if ((disponibles.get(c) ?? 0) > 0) disponibles.set(c, disponibles.get(c) - 1);
+        else nuevas.push(normalizar(e));
+      }
+      let entradas = v2.entradas;
+      let rev = v2.rev;
+      if (nuevas.length) {
+        const fusion = [...v2.entradas, ...nuevas];
+        try {
+          rev = escribirSiPermitido(v2.rev, fusion);
+          entradas = fusion;
+        } catch (e) {
+          entradas = fusion;
+          avisos.push(`Registros del formato anterior aún no fusionados (${e.message}). Ningún registro se perdió.`);
+        }
+      }
+      return { modo: "listo", rev, entradas, avisos: avisos.concat(avisoRepetidos(entradas)) };
     }
 
     let legado;
     try { legado = parsearLegado(rawLegado); } catch (e) {
-      return { modo: "bloqueado", rev: null, entradas: [], aviso: `${e.message} No se modificó nada.` };
+      return { modo: "bloqueado", rev: null, entradas: [], avisos: [`${e.message} No se modificó nada.`] };
     }
-    if (legado.length === 0) return { modo: "listo", rev: 0, entradas: [] };
+    if (legado.length === 0) return { modo: "listo", rev: 0, entradas: [], avisos: [] };
 
     const entradas = legado.map(normalizar);
     try {
-      return { modo: "listo", rev: escribir(0, entradas), entradas, migrado: true };
+      return { modo: "listo", rev: escribirSiPermitido(0, entradas), entradas, migrado: true, avisos: avisoRepetidos(entradas) };
     } catch (e) {
       // El formato anterior sigue intacto; se volverá a intentar en la siguiente operación.
       return {
         modo: "legado", rev: 0, entradas,
-        aviso: `No se pudo migrar el historial (${e.message}). Se sigue usando el formato anterior; no se pierde nada.`,
+        avisos: [`No se pudo migrar el historial (${e.message}). Se sigue usando el formato anterior; no se pierde nada.`],
       };
     }
   }
 
-  // Ejecuta una transformación dentro del bloqueo y escribe solo si hubo cambios.
-  function operar(transformar) {
-    return conBloqueo(() => {
-      const s = sincronizar();
-      if (s.modo === "bloqueado" || s.modo === "solo-lectura") throw new ErrorDatos(s.aviso);
+  function avisoRepetidos(entradas) {
+    const repetidos = identificadoresRepetidos(entradas);
+    return repetidos.length
+      ? [`Hay ${repetidos.length} identificador(es) repetido(s). Cada comparación se muestra y se gestiona por separado.`]
+      : [];
+  }
+
+  // Ejecuta una transformación con la protección adecuada y escribe solo si hubo cambios.
+  async function operar(transformar) {
+    const m = await modo();
+    if (m === "sin-garantia") throw new ErrorEscritura(MENSAJE_SIN_GARANTIA);
+    if (m === "presencia" && await otraPestanaActiva()) throw new ErrorEscritura(MENSAJE_OTRA_PESTANA);
+    const ejecutar = () => {
+      const s = sincronizar(true);
+      if (s.modo === "bloqueado" || s.modo === "solo-lectura") throw new ErrorDatos(s.avisos[0]);
       const { entradas, resultado } = transformar(s.entradas);
       if (entradas !== s.entradas) escribir(s.rev ?? 0, entradas);
       return resultado;
-    });
+    };
+    return m === "web-locks" ? bloqueo.ejecutar(ejecutar) : ejecutar();
   }
 
-  return {
-    bloqueoActivo,
+  function resultadoLectura(s, m) {
+    const claves = calcularClaves(s.entradas);
+    return {
+      modo: s.modo,
+      modoGarantia: m,
+      entradas: s.entradas,
+      registros: s.entradas.map((entrada, i) => ({ clave: claves[i], entrada, indice: i })),
+      avisos: s.avisos,
+      migrado: Boolean(s.migrado),
+    };
+  }
 
-    leer() {
-      return conBloqueo(() => {
-        const s = sincronizar();
-        return { modo: s.modo, entradas: s.entradas, aviso: s.aviso ?? null, migrado: Boolean(s.migrado) };
-      });
+  const api = {
+    // Modalidad efectiva: "web-locks", "presencia" o "sin-garantia".
+    modoActual: modo,
+
+    // Lectura de registros con clave. Migra o fusiona solo cuando puede escribir con garantía.
+    async leer() {
+      const m = await modo();
+      if (m === "web-locks") return bloqueo.ejecutar(() => resultadoLectura(sincronizar(true), m));
+      if (m === "presencia") {
+        // Con otra pestaña abierta se lee sin escribir, para no competir por el historial.
+        if (await otraPestanaActiva()) {
+          const s = sincronizar(false);
+          const r = resultadoLectura(s, m);
+          r.avisos = [...r.avisos, "Otra pestaña está abierta: el historial se muestra sin cambios hasta que la cierre."];
+          return r;
+        }
+        return resultadoLectura(sincronizar(true), m);
+      }
+      // Sin garantía: se lee, pero no se migra ni se fusiona.
+      return resultadoLectura(sincronizar(false), m);
     },
 
-    agregar(entrada) {
+    async agregar(entrada) {
       return operar((entradas) => {
         if (entradas.some((e) => objetoConId(e) && e.id === entrada.id)) {
           throw new Error("Ya existe una comparación con ese identificador.");
@@ -185,33 +347,64 @@ export function crearAlmacenHistorial({ almacen, bloqueo = bloqueoNavegador(), a
       });
     },
 
-    // Cambia el estado de varios registros. Solo modifica `estado` y `archivadoEn`.
-    cambiarEstado(ids, estado) {
+    // Cambia el estado de registros indicados por CLAVE. Solo modifica `estado` y `archivadoEn`.
+    async cambiarEstado(claves, estado) {
       if (!Object.values(ESTADO).includes(estado)) throw new Error("Estado no válido.");
-      const pedidos = new Set(ids);
+      const pedidas = [...new Set(claves)];
       return operar((entradas) => {
         const instante = ahora().toISOString();
-        const cambiados = [];
+        const clavesActuales = calcularClaves(entradas);
+        const cambiadas = [];
         const sinCambio = [];
-        const nuevas = entradas.map((e) => {
-          if (!objetoConId(e) || !pedidos.has(e.id)) return e;
+        const nuevas = entradas.map((e, i) => {
+          const clave = clavesActuales[i];
+          if (clave === null || !pedidas.includes(clave)) return e;
           if (estadoDe(e) === estado) {
-            if (!sinCambio.includes(e.id)) sinCambio.push(e.id);
+            sinCambio.push(clave);
             return e;
           }
-          if (!cambiados.includes(e.id)) cambiados.push(e.id);
+          cambiadas.push(clave);
           const copia = { ...e, estado };
           if (estado === ESTADO.ARCHIVADO) copia.archivadoEn = instante;
           else delete copia.archivadoEn;
           return copia;
         });
-        const existentes = new Set(entradas.filter(objetoConId).map((e) => e.id));
-        const noEncontrados = [...pedidos].filter((id) => !existentes.has(id));
+        const noEncontradas = pedidas.filter((c) => !clavesActuales.includes(c));
         return {
-          entradas: cambiados.length ? nuevas : entradas,
-          resultado: { cambiados, sinCambio, noEncontrados },
+          entradas: cambiadas.length ? nuevas : entradas,
+          resultado: { cambiados: cambiadas, sinCambio, noEncontrados: noEncontradas },
         };
       });
     },
+
+    // Uso aproximado de almacenamiento de todas las claves "comparador.*" del origen.
+    uso() {
+      try {
+        let bytes = 0;
+        for (let i = 0; i < almacen.length; i++) {
+          const k = almacen.key(i);
+          if (k && k.startsWith("comparador.")) bytes += (k.length + (almacen.getItem(k) ?? "").length) * 2;
+        }
+        return { bytes, supera: bytes >= UMBRAL_AVISO_BYTES };
+      } catch {
+        return null;
+      }
+    },
+
+    // Copia de seguridad en JSON. No modifica nada.
+    async exportar() {
+      const r = await api.leer();
+      return JSON.stringify({
+        formato: "comparador-historial",
+        esquema: ESQUEMA,
+        exportado: ahora().toISOString(),
+        entradas: r.entradas,
+      }, null, 2);
+    },
+
+    cerrar() {
+      if (canal) canal.close();
+    },
   };
+  return api;
 }
