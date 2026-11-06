@@ -441,3 +441,17 @@ button.peligro { border-color: var(--rojo); color: var(--rojo); }
   min-height: 48px;
 }
 .casilla-demo input { width: 22px; height: 22px; margin-right: 8px; vertical-align: middle; }
+
+/* ---------- Historial: estados activo / archivado ---------- */
+.filtros-historial { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.filtro-historial { flex: 1 1 auto; border: 1px solid var(--borde, #cfd6dd); background: #fff; border-radius: 8px; padding: 8px 10px; font: inherit; }
+.filtro-historial[aria-pressed="true"] { background: var(--azul, #1f4e79); color: #fff; border-color: transparent; }
+.fila-historial { display: flex; align-items: stretch; gap: 10px; }
+.fila-historial input[type="checkbox"] { flex: 0 0 auto; width: 22px; height: 22px; margin: 0 6px 0 0; align-self: center; }
+.fila-historial .item-historial { flex: 1 1 auto; }
+.acciones-historial { margin: 8px 0 12px; }
+.etiqueta-archivado { font-size: 12px; font-weight: 600; color: var(--texto-suave); border: 1px solid var(--borde, #cfd6dd); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
+.alerta-historial { border: 1px solid var(--rojo); color: var(--rojo); border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: #fff; }
+.error-historial { color: var(--rojo); }
+.vista-previa { border: 1px solid var(--borde, #cfd6dd); border-radius: 10px; padding: 12px; margin: 12px 0; background: #fff; }
+.vista-previa ul { margin: 8px 0; }
