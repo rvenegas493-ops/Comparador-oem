@@ -11,13 +11,12 @@ import {
   leerConfiguracionIA, guardarConfiguracionIA, borrarConfiguracionIA,
   iaDisponible, resumenEnvio, consultarIA,
 } from "./ia-cliente.js";
+import { crearAlmacenHistorial, ErrorCuota, ErrorEscritura, ErrorDatos, ESTADO, estadoDe, CLAVE_LEGADO, CLAVE_V2 } from "./historial.js";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const RUTA_REGISTRO_IA = "ejemplo/documentos-demo/documentos.json";
 let registroIA = null;
 const CLAVE_AJUSTES = "comparador.adaptador";
-const CLAVE_HISTORIAL = "comparador.historial";
-const MAX_HISTORIAL = 30;
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -197,8 +196,9 @@ async function comparar() {
       errores: r.resultado.errores.length,
       markdown: r.markdown,
     };
-    guardarEnHistorial(entrada);
+    const avisoGuardado = await guardarEnHistorial(entrada);
     renderResultados(r, entrada);
+    if (avisoGuardado) mostrarAvisoGuardado(avisoGuardado, "#resultados");
   } catch (err) {
     if (err instanceof LecturaError || err instanceof ConfigError) {
       mostrarError(err.message);
@@ -371,6 +371,7 @@ function montarBloqueIA(r) {
     <div class="tarjeta">
       <p class="ayuda">La IA solo explica diferencias que tienen documentación citada. Toda explicación requiere validación técnica humana.</p>
       <p id="ia-estado" class="ayuda" role="status"></p>
+      <label class="casilla-demo"><input id="ia-demo" type="checkbox"> Autorizo esta prueba de IA y confirmo que solo se usarán datos sintéticos (parámetros DEMO_).</label>
       <button id="btn-ia" type="button" class="primario">Explicar diferencias con IA</button>
       <div id="ia-resultado"></div>
     </div>`;
@@ -378,7 +379,9 @@ function montarBloqueIA(r) {
 
   const config = leerConfiguracionIA();
   const disponible = iaDisponible(config, navigator.onLine);
-  $("#btn-ia").disabled = !disponible;
+  const actualizarBoton = () => { $("#btn-ia").disabled = !(disponible && $("#ia-demo").checked); };
+  $("#ia-demo").addEventListener("change", actualizarBoton);
+  actualizarBoton();
   $("#ia-estado").textContent = disponible
     ? "Servicio configurado. Antes de enviar se le mostrará exactamente qué información se enviará."
     : config.url
@@ -410,7 +413,19 @@ async function explicarConIA(r) {
     return;
   }
 
-  const { items, noDeterminables } = construirSolicitud(r.resultado, registro);
+  if (!$("#ia-demo").checked) {
+    salida.innerHTML = '<p class="error">Marque la casilla de autorización para usar la IA en modo demostración.</p>';
+    return;
+  }
+  // Modo demostración: solo parámetros sintéticos (DEMO_). Lo demás no se envía.
+  const construida = construirSolicitud(r.resultado, registro);
+  const items = construida.items.filter((it) => it.nombre.startsWith("DEMO_"));
+  const noDeterminables = [
+    ...construida.noDeterminables,
+    ...construida.items
+      .filter((it) => !it.nombre.startsWith("DEMO_"))
+      .map((it) => ({ nombre: it.nombre, motivo: "fuera del modo demostración: solo se envían parámetros sintéticos DEMO_" })),
+  ];
   if (items.length === 0) {
     salida.innerHTML = `<div class="tarjeta"><p class="ayuda">No hay diferencias de valor con documentación en el registro. No se envió nada.</p>
       ${noDeterminables.length ? `<ul class="lista">${noDeterminables.map((n) => `<li>${esc(n.nombre)}: ${esc(n.motivo)}</li>`).join("")}</ul>` : ""}</div>`;
@@ -426,7 +441,7 @@ async function explicarConIA(r) {
 
   boton.disabled = true;
   salida.innerHTML = '<p class="ayuda">Consultando el servicio…</p>';
-  const resp = await consultarIA({ solicitud, items, registro, config });
+  const resp = await consultarIA({ solicitud, items, registro, config, modoDemo: true });
   boton.disabled = false;
   if (!resp.ok) {
     salida.innerHTML = `<div class="error">${esc(resp.error)}</div>`;
@@ -443,7 +458,11 @@ function renderIA(resp, noDeterminables, r) {
     ...resp.items.filter((i) => i.estado !== "validada").map((i) => ({ nombre: i.nombre, motivo: i.motivo })),
   ];
 
+  const etiqueta = resp.modo === "demostracion"
+    ? `<div class="aviso-demo" role="note"><strong>MODO DEMOSTRACIÓN</strong> · prueba técnica con datos sintéticos. No es una función de producción ni sirve para diagnóstico.</div>`
+    : "";
   return `
+    ${etiqueta}
     <div class="ia-bloque comprobado">
       <h3>Datos comprobados por el comparador</h3>
       <p class="ayuda">Obtenidos directamente de los archivos. No son interpretación.</p>
@@ -483,63 +502,265 @@ function descargar(nombre, contenido, tipo) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// ---------- Historial local ----------
+// ---------- Historial local (estados: activo / archivado) ----------
+// La lógica de almacenamiento está en historial.js. Aquí solo se muestra y se confirma.
+// Ninguna acción de esta pantalla borra registros: solo archivar, restaurar y exportar.
+// Cada registro se gestiona por su clave, así que un identificador repetido nunca afecta a otros.
 
-function leerHistorial() {
+let almacenHistorialInstancia = null;
+const historial = () => {
+  if (!almacenHistorialInstancia) {
+    almacenHistorialInstancia = crearAlmacenHistorial({ almacen: globalThis.localStorage });
+  }
+  return almacenHistorialInstancia;
+};
+
+let filtroHistorial = "activos"; // "activos" | "archivados" | "todos"
+const seleccion = new Set();     // claves de registro
+let pendiente = null;            // { claves, estado } esperando confirmación
+let ultimosRegistros = [];       // registros válidos del último render
+let ultimasVisibles = [];        // claves visibles del último render
+const ETIQUETAS_FILTRO = { activos: "Activos", archivados: "Archivados", todos: "Todos" };
+
+const estaArchivada = (e) => estadoDe(e) === ESTADO.ARCHIVADO;
+const fechaLegible = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString("es-MX");
+};
+
+function mensajeFalloGuardado(err) {
+  if (err instanceof ErrorCuota) {
+    return "No se guardó esta comparación en el historial: el almacenamiento de este navegador está lleno. El reporte sigue disponible para descargar abajo. Archive comparaciones o exporte una copia para liberar espacio.";
+  }
+  if (err instanceof ErrorEscritura) {
+    return `No se guardó esta comparación. ${err.message} El reporte sigue disponible para descargar abajo.`;
+  }
+  if (err instanceof ErrorDatos) {
+    return "No se guardó esta comparación: el historial existente no se pudo leer y se protege sin modificarlo. El reporte sigue disponible para descargar abajo.";
+  }
+  return "No se guardó esta comparación por un fallo inesperado. El historial anterior se conserva. El reporte sigue disponible para descargar abajo.";
+}
+
+// Devuelve null si se guardó, o el mensaje que debe ver el técnico.
+async function guardarEnHistorial(entrada) {
   try {
-    const h = JSON.parse(localStorage.getItem(CLAVE_HISTORIAL) ?? "[]");
-    return Array.isArray(h) ? h : [];
-  } catch {
-    return [];
+    await historial().agregar(entrada);
+    return null;
+  } catch (err) {
+    return mensajeFalloGuardado(err);
   }
 }
 
-function guardarEnHistorial(entrada) {
-  let lista = [entrada, ...leerHistorial()].slice(0, MAX_HISTORIAL);
-  while (true) {
-    try {
-      localStorage.setItem(CLAVE_HISTORIAL, JSON.stringify(lista));
-      return;
-    } catch {
-      if (lista.length <= 1) return; // espacio agotado: el reporte sigue descargable
-      lista = lista.slice(0, -1);
-    }
-  }
+function mostrarAvisoGuardado(mensaje, destino) {
+  $(destino).insertAdjacentHTML("afterbegin", `<div class="alerta-historial" role="alert">${esc(mensaje)}</div>`);
 }
 
-function renderHistorial() {
-  const lista = leerHistorial();
-  $("#detalle-historial").innerHTML = "";
-  if (!lista.length) {
-    $("#lista-historial").innerHTML = '<p class="ayuda">Aún no hay comparaciones guardadas.</p>';
+function mensajeHistorial(texto, esError = false) {
+  const el = $("#estado-historial");
+  el.textContent = texto;
+  el.classList.toggle("error-historial", esError);
+}
+
+async function renderHistorial() {
+  const lista = $("#lista-historial");
+  let estado;
+  try {
+    estado = await historial().leer();
+  } catch (err) {
+    lista.innerHTML = `<div class="alerta-historial" role="alert">No se pudo leer el historial: ${esc(err.message)}</div>`;
     return;
   }
-  $("#lista-historial").innerHTML = lista.map((h) => `
-    <button class="item-historial" type="button" data-id="${esc(h.id)}">
-      ${esc(h.a.nombre)} vs ${esc(h.b.nombre)}
-      <small>${esc(new Date(h.fecha).toLocaleString("es-MX"))} · ${esc(h.cambios)} cambios · ${esc(h.errores)} errores</small>
-    </button>`).join("");
+
+  const registros = estado.registros
+    .filter((r) => r.clave !== null)
+    .sort((a, b) => String(b.entrada.fecha ?? "").localeCompare(String(a.entrada.fecha ?? "")));
+  ultimosRegistros = registros;
+  const cuentas = {
+    activos: registros.filter((r) => !estaArchivada(r.entrada)).length,
+    archivados: registros.filter((r) => estaArchivada(r.entrada)).length,
+    todos: registros.length,
+  };
+  const visibles = registros.filter((r) =>
+    filtroHistorial === "todos" || (filtroHistorial === "archivados") === estaArchivada(r.entrada));
+  ultimasVisibles = visibles.map((r) => r.clave);
+  for (const clave of [...seleccion]) if (!ultimasVisibles.includes(clave)) seleccion.delete(clave);
+
+  const avisos = estado.avisos.map((m) => `<div class="alerta-historial" role="alert">${esc(m)}</div>`);
+  if (estado.modoGarantia !== "web-locks") {
+    avisos.push(`<p class="ayuda">${estado.modoGarantia === "presencia"
+      ? "Este navegador no admite bloqueo entre pestañas. Guarde o archive desde una sola pestaña de la aplicación."
+      : "Este navegador no permite guardar el historial de forma segura. Puede consultarlo y exportarlo."}</p>`);
+  }
+  const uso = historial().uso();
+  if (uso?.supera) {
+    const mb = (uso.bytes / (1024 * 1024)).toFixed(1);
+    avisos.push(`<div class="alerta-historial" role="status">El historial de este navegador ocupa aproximadamente ${mb} MB. Puede archivar lo que ya no necesite o exportar una copia. Nada se borra automáticamente.</div>`);
+  }
+
+  const filtros = Object.entries(ETIQUETAS_FILTRO).map(([clave, texto]) =>
+    `<button type="button" class="filtro-historial" data-filtro="${clave}" aria-pressed="${filtroHistorial === clave}">${texto} (${cuentas[clave]})</button>`
+  ).join("");
+
+  const filas = visibles.length
+    ? visibles.map(({ clave, entrada: h }) => `
+      <div class="fila-historial">
+        <input type="checkbox" data-sel="${esc(clave)}" aria-label="Seleccionar ${esc(h.a?.nombre ?? "")} contra ${esc(h.b?.nombre ?? "")}" ${seleccion.has(clave) ? "checked" : ""}>
+        <button class="item-historial" type="button" data-id="${esc(clave)}">
+          ${esc(h.a?.nombre ?? "")} vs ${esc(h.b?.nombre ?? "")}${estaArchivada(h) ? ' <span class="etiqueta-archivado">Archivado</span>' : ""}
+          <small>${esc(fechaLegible(h.fecha))} · ${esc(h.cambios ?? 0)} cambios · ${esc(h.errores ?? 0)} errores${h.simulacion ? " · simulación" : ""}</small>
+        </button>
+      </div>`).join("")
+    : '<p class="ayuda">No hay comparaciones en esta vista.</p>';
+
+  const n = seleccion.size;
+  const acciones = [
+    '<button type="button" class="secundario" data-accion="seleccionar-visibles">Seleccionar visibles</button>',
+  ];
+  if (filtroHistorial !== "archivados") {
+    acciones.push(`<button type="button" class="secundario" data-accion="archivar" ${n ? "" : "disabled"}>Archivar seleccionados (${n})</button>`);
+  }
+  if (filtroHistorial !== "activos") {
+    acciones.push(`<button type="button" class="secundario" data-accion="restaurar" ${n ? "" : "disabled"}>Restaurar seleccionados (${n})</button>`);
+  }
+
+  let previa = "";
+  if (pendiente) {
+    const cambian = registros.filter((r) => pendiente.claves.includes(r.clave) && estadoDe(r.entrada) !== pendiente.estado);
+    const accionTexto = pendiente.estado === ESTADO.ARCHIVADO ? "archivar" : "restaurar";
+    const nombres = cambian.slice(0, 10).map(({ entrada: e }) => `<li>${esc(e.a?.nombre ?? "")} vs ${esc(e.b?.nombre ?? "")}</li>`).join("");
+    const resto = cambian.length > 10 ? `<li>… y ${cambian.length - 10} más</li>` : "";
+    previa = `
+      <div class="vista-previa" role="region" aria-label="Vista previa de la operación">
+        <p><strong>Vista previa:</strong> se van a ${accionTexto} ${cambian.length} comparación(es). Nada se borra; podrá revertirlo desde la vista correspondiente.</p>
+        ${cambian.length ? `<ul class="lista">${nombres}${resto}</ul>` : "<p class=\"ayuda\">No hay cambios que aplicar.</p>"}
+        <div class="fila-botones">
+          <button type="button" data-accion="confirmar" ${cambian.length ? "" : "disabled"}>Confirmar</button>
+          <button type="button" class="secundario" data-accion="cancelar">Cancelar</button>
+        </div>
+      </div>`;
+  }
+
+  lista.innerHTML = `
+    ${avisos.join("")}
+    <div class="filtros-historial" role="group" aria-label="Filtrar por estado">${filtros}</div>
+    ${previa}
+    <div class="fila-botones acciones-historial">${acciones.join("")}</div>
+    ${filas}`;
 }
 
-function verHistorial(id) {
-  const h = leerHistorial().find((x) => x.id === id);
+function prepararCambio(claves, estado) {
+  if (!claves.length) return;
+  pendiente = { claves: [...claves], estado };
+  renderHistorial();
+}
+
+async function confirmarCambio() {
+  if (!pendiente) return;
+  const { claves, estado } = pendiente;
+  pendiente = null;
+  try {
+    const r = await historial().cambiarEstado(claves, estado);
+    for (const clave of r.cambiados) seleccion.delete(clave);
+    const verbo = estado === ESTADO.ARCHIVADO ? "archivada(s)" : "restaurada(s)";
+    const extra = r.noEncontrados.length ? ` ${r.noEncontrados.length} no se encontró(aron) y no se modificó(aron).` : "";
+    mensajeHistorial(`${r.cambiados.length} comparación(es) ${verbo}. Nada se borró.${extra}`);
+  } catch (err) {
+    mensajeHistorial(`No se aplicó el cambio: ${err.message} Los registros no se modificaron.`, true);
+  }
+  await renderHistorial();
+}
+
+async function exportarHistorial() {
+  try {
+    const json = await historial().exportar();
+    const fecha = new Date().toISOString().slice(0, 10);
+    descargar(`historial-comparador-${fecha}.json`, json, "application/json");
+    mensajeHistorial("Copia exportada. El historial no se modificó.");
+  } catch (err) {
+    mensajeHistorial(`No se pudo exportar el historial: ${err.message}`, true);
+  }
+}
+
+function accionHistorial(accion) {
+  if (accion === "seleccionar-visibles") {
+    for (const clave of ultimasVisibles) seleccion.add(clave);
+    pendiente = null;
+    return renderHistorial();
+  }
+  if (accion === "archivar") return prepararCambio([...seleccion], ESTADO.ARCHIVADO);
+  if (accion === "restaurar") return prepararCambio([...seleccion], ESTADO.ACTIVO);
+  if (accion === "archivar-todo") {
+    return prepararCambio(ultimosRegistros.filter((r) => !estaArchivada(r.entrada)).map((r) => r.clave), ESTADO.ARCHIVADO);
+  }
+  if (accion === "exportar") return exportarHistorial();
+  if (accion === "confirmar") return confirmarCambio();
+  if (accion === "cancelar") {
+    pendiente = null;
+    return renderHistorial();
+  }
+}
+
+async function verHistorial(clave) {
+  let h;
+  try {
+    const r = (await historial().leer()).registros.find((x) => x.clave === clave);
+    h = r?.entrada;
+  } catch (err) {
+    mensajeHistorial(`No se pudo abrir la comparación: ${err.message}`, true);
+    return;
+  }
   if (!h) return;
+  const archivada = estaArchivada(h);
   $("#detalle-historial").innerHTML = `
     <div class="fila-botones">
       <button id="hist-md" type="button" class="secundario">Descargar Markdown</button>
       <button id="hist-html" type="button" class="secundario">Descargar HTML</button>
-      <button id="hist-borrar" type="button" class="peligro">Borrar este reporte</button>
+      <button id="hist-estado" type="button" class="secundario">${archivada ? "Restaurar esta comparación" : "Archivar esta comparación"}</button>
     </div>
     <div class="reporte">${mdToHtml(h.markdown)}</div>`;
   const base = `reporte_${h.fecha.slice(0, 19).replace(/[:T]/g, "-")}`;
   $("#hist-md").addEventListener("click", () => descargar(`${base}.md`, h.markdown, "text/markdown"));
   $("#hist-html").addEventListener("click", () =>
     descargar(`${base}.html`, htmlDocumento(h.markdown, "Reporte de comparación"), "text/html"));
-  $("#hist-borrar").addEventListener("click", () => {
-    localStorage.setItem(CLAVE_HISTORIAL, JSON.stringify(leerHistorial().filter((x) => x.id !== id)));
-    renderHistorial();
+  $("#hist-estado").addEventListener("click", async () => {
+    // Acción individual y reversible: no requiere vista previa.
+    try {
+      await historial().cambiarEstado([clave], archivada ? ESTADO.ACTIVO : ESTADO.ARCHIVADO);
+      mensajeHistorial(archivada ? "Comparación restaurada a Activos." : "Comparación archivada. Puede restaurarla desde Archivados. Nada se borró.");
+      $("#detalle-historial").innerHTML = "";
+      await renderHistorial();
+    } catch (err) {
+      mensajeHistorial(`No se aplicó el cambio: ${err.message} Los registros no se modificaron.`, true);
+    }
   });
   $("#detalle-historial").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function iniciarHistorial() {
+  const vista = $("#vista-historial");
+  vista.addEventListener("click", (e) => {
+    const filtro = e.target.closest("[data-filtro]");
+    if (filtro) {
+      filtroHistorial = filtro.dataset.filtro;
+      pendiente = null;
+      return renderHistorial();
+    }
+    const accion = e.target.closest("[data-accion]");
+    if (accion && !accion.disabled) return accionHistorial(accion.dataset.accion);
+    const item = e.target.closest(".item-historial[data-id]");
+    if (item) verHistorial(item.dataset.id);
+  });
+  vista.addEventListener("change", (e) => {
+    const casilla = e.target.closest("[data-sel]");
+    if (!casilla) return;
+    if (casilla.checked) seleccion.add(casilla.dataset.sel);
+    else seleccion.delete(casilla.dataset.sel);
+    renderHistorial();
+  });
+  // Otra pestaña cambió el historial: se vuelve a leer para no mostrar datos antiguos.
+  window.addEventListener("storage", (e) => {
+    if ((e.key === CLAVE_V2 || e.key === CLAVE_LEGADO) && !vista.hidden) renderHistorial();
+  });
 }
 
 // ---------- Pantalla de inicio: tres opciones ----------
@@ -577,7 +798,7 @@ async function iniciarSimulacion() {
       markdown: r.markdown,
       simulacion: true,
     };
-    guardarEnHistorial(entrada);
+    const avisoGuardado = await guardarEnHistorial(entrada);
     const bloque = `
       <h2>Explicación demostrativa</h2>
       <div class="tarjeta">
@@ -588,6 +809,7 @@ async function iniciarSimulacion() {
       <div id="sim-tabla"></div>`;
     $("#resultado-simulacion").innerHTML = bloque;
     renderResultados(r, entrada, "#sim-tabla", "-sim");
+    if (avisoGuardado) mostrarAvisoGuardado(avisoGuardado, "#resultado-simulacion");
   } catch (err) {
     error.textContent = `No se pudo ejecutar la simulación: ${err.message}`;
     error.hidden = false;
@@ -712,16 +934,6 @@ function init() {
   $("#btn-simular").addEventListener("click", iniciarSimulacion);
   $("#fi").addEventListener("change", () => mostrarNombre($("#fi"), "#nombre-i"));
   $("#btn-inspeccionar").addEventListener("click", inspeccionarArchivo);
-  $("#lista-historial").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-id]");
-    if (b) verHistorial(b.dataset.id);
-  });
-  $("#btn-borrar-historial").addEventListener("click", () => {
-    if (confirm("¿Borrar todo el historial de este dispositivo?")) {
-      localStorage.removeItem(CLAVE_HISTORIAL);
-      renderHistorial();
-    }
-  });
   $("#form-ajustes").addEventListener("submit", guardarAjustes);
   $("#btn-restaurar").addEventListener("click", restaurarAjustes);
   $("#form-ia").addEventListener("submit", guardarFormularioIA);
@@ -729,6 +941,7 @@ function init() {
 
   cargarFormularioAjustes();
   cargarFormularioIA();
+  iniciarHistorial();
   renderHistorial();
 
   if ("serviceWorker" in navigator) {

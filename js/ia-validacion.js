@@ -32,6 +32,9 @@ const RE_CIFRA = /\d+(?:[.,]\d+)?/g;
 const normalizar = (t) => String(t).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 const cifras = (t) => new Set([...String(t ?? "").matchAll(RE_CIFRA)].map((m) => m[0].replace(",", ".")));
 const claveCita = (c) => `${c.doc}#${c.seccion}`;
+const escaparRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export const contieneTermino = (texto, termino) =>
+  new RegExp(`(^|[^\\p{L}\\d])${escaparRegex(termino)}(?=$|[^\\p{L}\\d])`, "iu").test(texto);
 
 // ---------- Registro documental ----------
 
@@ -105,6 +108,15 @@ export function validarSolicitud(cuerpo, registro) {
       else if (!permitidas.has(claveCita(c))) errores.push(`${etiqueta}: cita no autorizada ${claveCita(c)}`);
     }
   });
+  // Segunda comprobación de documentación suficiente (el cliente no es de confianza).
+  items.forEach((it, i) => {
+    if (!it || typeof it !== "object") return;
+    if (it.estado !== "cambiado") errores.push(`items[${i}]: solo se interpretan diferencias de valor`);
+    const textos = (Array.isArray(it.citas) ? it.citas : []).map((c) => fragmento(registro, c)?.texto ?? "").join(" ");
+    if (typeof it.unidad !== "string" || !contieneTermino(textos, it.unidad)) {
+      errores.push(`items[${i}]: la unidad no aparece en la documentación citada`);
+    }
+  });
   return { ok: errores.length === 0, errores };
 }
 
@@ -123,6 +135,18 @@ export function construirSolicitud(resultado, registro) {
     const citas = citasPermitidas(registro, d.nombre).map((c) => ({ doc: c.doc, seccion: c.seccion }));
     if (citas.length === 0) {
       noDeterminables.push({ nombre: d.nombre, motivo: "sin documentación en el registro" });
+      continue;
+    }
+    // Solo diferencias de valor (ambos lados presentes) pueden interpretarse.
+    if (d.estado !== "cambiado") {
+      noDeterminables.push({ nombre: d.nombre, motivo: "no es una diferencia de valor: falta el valor en A o en B" });
+      continue;
+    }
+    // La unidad debe aparecer literalmente en la documentación citada. Sin ella no hay evidencia suficiente.
+    const unidad = d.a?.unidad ?? d.b?.unidad ?? null;
+    const textoCitado = citas.map((c) => fragmento(registro, c)?.texto ?? "").join(" ");
+    if (!unidad || !contieneTermino(textoCitado, unidad)) {
+      noDeterminables.push({ nombre: d.nombre, motivo: "documentación insuficiente: la unidad no aparece en la documentación citada" });
       continue;
     }
     if (items.length >= MAX_ITEMS) {
@@ -189,6 +213,26 @@ export function validarExplicacion(e, item, registro) {
   return { ok: true, motivo: null, texto };
 }
 
+const CAMPOS_EXPLICACION = ["nombre", "estado", "texto", "citas"];
+const CAMPOS_CITA = ["doc", "seccion"];
+
+// Verifica la forma exacta de una explicación: sin campos extra y con tipos correctos.
+// Devuelve el motivo del fallo o null.
+export function estructuraExplicacion(e) {
+  if (!e || typeof e !== "object" || Array.isArray(e)) return "la explicación no es un objeto";
+  for (const k of Object.keys(e)) if (!CAMPOS_EXPLICACION.includes(k)) return `campo no permitido: ${k}`;
+  if (typeof e.nombre !== "string") return "nombre no válido";
+  if (!["explicado", "no_determinable"].includes(e.estado)) return "estado no válido";
+  if (e.estado === "explicado" && typeof e.texto !== "string") return "texto ausente";
+  if (!Array.isArray(e.citas)) return "las citas no son una lista";
+  for (const c of e.citas) {
+    if (!c || typeof c !== "object" || Array.isArray(c)) return "cita no es un objeto";
+    for (const k of Object.keys(c)) if (!CAMPOS_CITA.includes(k)) return `campo de cita no permitido: ${k}`;
+    if (typeof c.doc !== "string" || typeof c.seccion !== "string") return "cita mal formada";
+  }
+  return null;
+}
+
 // Interpreta la respuesta del modelo para cada parámetro solicitado.
 // Nunca devuelve texto no validado: cada parámetro queda en "validada",
 // "no_determinable" o "rechazada".
@@ -205,6 +249,7 @@ export function interpretarRespuesta(textoModelo, items, registro) {
     return rechazarTodo("la respuesta no es JSON válido");
   }
   if (!obj || !Array.isArray(obj.explicaciones)) return rechazarTodo("formato de respuesta no válido");
+  if (Object.keys(obj).some((k) => k !== "explicaciones")) return rechazarTodo("formato no válido: campos no permitidos en la respuesta");
 
   const solicitados = new Set(items.map((i) => i.nombre));
   const conteo = new Map();
@@ -222,6 +267,8 @@ export function interpretarRespuesta(textoModelo, items, registro) {
     if (repeticiones > 1) return { nombre: item.nombre, estado: "rechazada", motivo: "respuesta repetida" };
     const e = obj.explicaciones.find((x) => x && x.nombre === item.nombre);
     if (!e) return { nombre: item.nombre, estado: "no_determinable", motivo: "el modelo no respondió este parámetro" };
+    const fallo = estructuraExplicacion(e);
+    if (fallo) return { nombre: item.nombre, estado: "rechazada", motivo: `estructura: ${fallo}` };
     if (e.estado === "no_determinable") {
       return { nombre: item.nombre, estado: "no_determinable", motivo: "evidencia insuficiente en la documentación citada" };
     }

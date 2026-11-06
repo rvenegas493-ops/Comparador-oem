@@ -2,21 +2,37 @@
 // los nombres de los parámetros, sus valores y las citas documentales. Nunca envía
 // archivos, nombres de archivo, SHA-256 ni datos de clientes.
 //
-// El navegador solo guarda la URL del servicio y un token de acceso revocable.
-// No contiene ninguna clave del proveedor de IA.
+// Seguridad del token: se guarda solo en sessionStorage (se borra al cerrar la pestaña).
+// Nunca se guarda en localStorage, en la URL ni en el código. La dirección del servicio
+// sí se guarda en localStorage porque no es secreta.
 import { validarExplicacion, fragmento } from "./ia-validacion.js";
 
-export const CLAVE_IA = "comparador.ia";
+export const CLAVE_IA = "comparador.ia";           // localStorage: solo la URL
+export const CLAVE_TOKEN_IA = "comparador.ia.token"; // sessionStorage: el token
 export const RUTA_INTERPRETAR = "/v1/interpretar";
+export const CABECERA_DEMO = "x-modo-demostracion";
+export const VALOR_CONFIRMACION_DEMO = "sintetico-confirmado";
 
-// Lee la configuración guardada. Nunca lanza excepciones.
-export function leerConfiguracionIA(almacen = globalThis.localStorage) {
+const sinAlmacen = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+const seguro = (almacen) => almacen ?? sinAlmacen;
+
+// Lee la configuración. Elimina cualquier token que quedara en localStorage de versiones anteriores.
+export function leerConfiguracionIA(almacenUrl = globalThis.localStorage, almacenToken = globalThis.sessionStorage) {
+  let url = "";
   try {
-    const c = JSON.parse(almacen?.getItem(CLAVE_IA) ?? "{}");
-    return { url: typeof c.url === "string" ? c.url : "", token: typeof c.token === "string" ? c.token : "" };
+    const c = JSON.parse(seguro(almacenUrl).getItem(CLAVE_IA) ?? "{}");
+    url = typeof c.url === "string" ? c.url : "";
+    if ("token" in c) seguro(almacenUrl).setItem(CLAVE_IA, JSON.stringify({ url }));
   } catch {
-    return { url: "", token: "" };
+    url = "";
   }
+  let token = "";
+  try {
+    token = seguro(almacenToken).getItem(CLAVE_TOKEN_IA) ?? "";
+  } catch {
+    token = "";
+  }
+  return { url, token };
 }
 
 // Acepta HTTPS, o HTTP solo para localhost (pruebas locales).
@@ -37,25 +53,27 @@ export function validarUrlServicio(url) {
   return null;
 }
 
-export function guardarConfiguracionIA(config, almacen = globalThis.localStorage) {
+export function guardarConfiguracionIA(config, almacenUrl = globalThis.localStorage, almacenToken = globalThis.sessionStorage) {
   const url = String(config.url ?? "").trim();
   const token = String(config.token ?? "").trim();
   if (url === "" && token === "") {
-    almacen.removeItem(CLAVE_IA);
+    borrarConfiguracionIA(almacenUrl, almacenToken);
     return { ok: true };
   }
   const error = validarUrlServicio(url);
   if (error) return { ok: false, error };
   if (token.length < 16) return { ok: false, error: "el token debe tener al menos 16 caracteres" };
-  almacen.setItem(CLAVE_IA, JSON.stringify({ url, token }));
+  seguro(almacenUrl).setItem(CLAVE_IA, JSON.stringify({ url }));
+  seguro(almacenToken).setItem(CLAVE_TOKEN_IA, token);
   return { ok: true };
 }
 
-export function borrarConfiguracionIA(almacen = globalThis.localStorage) {
-  almacen.removeItem(CLAVE_IA);
+export function borrarConfiguracionIA(almacenUrl = globalThis.localStorage, almacenToken = globalThis.sessionStorage) {
+  seguro(almacenUrl).removeItem(CLAVE_IA);
+  seguro(almacenToken).removeItem(CLAVE_TOKEN_IA);
 }
 
-// La IA solo se ofrece si hay URL válida y token, y el dispositivo tiene conexión.
+// La IA solo está disponible con configuración completa y conexión.
 export function iaDisponible(config, enLinea = true) {
   return enLinea && !validarUrlServicio(config.url ?? "") && (config.token ?? "").length >= 16;
 }
@@ -87,18 +105,28 @@ export function revalidarRespuesta(respuesta, items, registro) {
   return { items: salida, descartados: respuesta.descartados ?? 0 };
 }
 
-// Envía la solicitud y devuelve { ok, items, descartados, huella, modelo } o { ok:false, error }.
-// fetchFn y config son inyectables para pruebas.
-export async function consultarIA({ solicitud, items, registro, config, fetchFn = globalThis.fetch, timeoutMs = 30000 }) {
+const MENSAJES_ERROR = {
+  401: "token no autorizado: revise el token en Ajustes",
+  403: "el servicio requiere confirmar que se usan datos sintéticos",
+  429: "límite de uso alcanzado: la cuota de prueba puede haberse agotado. Intente más tarde; el comparador sigue funcionando sin IA.",
+  502: "la IA no respondió (fallo temporal del servicio). El comparador sigue funcionando sin IA.",
+  503: "el servicio de interpretación no está disponible",
+};
+
+// Envía la solicitud. Devuelve { ok, items, descartados, huella, modelo, modo } o { ok:false, error }.
+// Si modoDemo es true, envía la confirmación de datos sintéticos (el usuario la marcó en pantalla).
+export async function consultarIA({ solicitud, items, registro, config, modoDemo = false, fetchFn = globalThis.fetch, timeoutMs = 30000 }) {
   const error = validarUrlServicio(config.url);
   if (error) return { ok: false, error };
   const controlador = new AbortController();
   const temporizador = setTimeout(() => controlador.abort(), timeoutMs);
+  const cabeceras = { "content-type": "application/json", authorization: `Bearer ${config.token}` };
+  if (modoDemo) cabeceras[CABECERA_DEMO] = VALOR_CONFIRMACION_DEMO;
   let resp;
   try {
     resp = await fetchFn(`${config.url.replace(/\/$/, "")}${RUTA_INTERPRETAR}`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${config.token}` },
+      headers: cabeceras,
       body: JSON.stringify({ items: solicitud.items }),
       signal: controlador.signal,
       credentials: "omit",
@@ -110,10 +138,7 @@ export async function consultarIA({ solicitud, items, registro, config, fetchFn 
     clearTimeout(temporizador);
   }
 
-  if (resp.status === 401) return { ok: false, error: "token no autorizado: revise la configuración" };
-  if (resp.status === 429) return { ok: false, error: "límite de uso alcanzado: intente más tarde" };
-  if (resp.status === 503) return { ok: false, error: "el servicio de interpretación no está disponible" };
-  if (!resp.ok) return { ok: false, error: "el servicio devolvió un error" };
+  if (!resp.ok) return { ok: false, error: MENSAJES_ERROR[resp.status] ?? "el servicio devolvió un error" };
 
   let cuerpo;
   try {
@@ -122,5 +147,13 @@ export async function consultarIA({ solicitud, items, registro, config, fetchFn 
     return { ok: false, error: "respuesta del servicio no válida" };
   }
   const revalidada = revalidarRespuesta(cuerpo, items, registro);
-  return { ok: true, items: revalidada.items, descartados: revalidada.descartados, huella: cuerpo.huella ?? null, modelo: cuerpo.modelo ?? null, generado: cuerpo.generado_utc ?? null };
+  return {
+    ok: true,
+    modo: cuerpo.modo ?? "produccion",
+    items: revalidada.items,
+    descartados: revalidada.descartados,
+    huella: cuerpo.huella ?? null,
+    modelo: cuerpo.modelo ?? null,
+    generado: cuerpo.generado_utc ?? null,
+  };
 }
