@@ -1,7 +1,7 @@
 // Service worker: precarga la app para funcionar sin conexión.
 // Al cambiar cualquier archivo de la app, incrementar VERSION para que los
 // dispositivos reciban la nueva versión.
-const VERSION = "comparador-v1.0.0";
+const VERSION = "comparador-v1.1.0";
 
 const RECURSOS = [
   "./",
@@ -10,6 +10,8 @@ const RECURSOS = [
   "./js/motor.js",
   "./js/markdown.js",
   "./js/app.js",
+  "./js/inspeccion.js",
+  "./js/simulacion.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
@@ -18,6 +20,9 @@ const RECURSOS = [
   "./ejemplo/diccionario.csv",
   "./ejemplo/export_a.csv",
   "./ejemplo/export_b.csv",
+  "./ejemplo/demo/demo_a.csv",
+  "./ejemplo/demo/demo_b.csv",
+  "./ejemplo/demo/demo_diccionario.csv",
 ];
 
 self.addEventListener("install", (event) => {

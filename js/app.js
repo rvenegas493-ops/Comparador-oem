@@ -3,8 +3,10 @@
 // y del diccionario de ejemplo, ambos servidos desde la caché del service worker.
 import { procesar, crearAdaptador, ADAPTADOR_POR_DEFECTO, LecturaError, ConfigError } from "./motor.js";
 import { mdToHtml, htmlDocumento } from "./markdown.js";
+import { inspeccionar, reporteEstructural, LEYENDA_INSPECCION } from "./inspeccion.js";
+import { ejecutarSimulacion, LEYENDA_SIMULACION, EXPLICACION_DEMOSTRATIVA } from "./simulacion.js";
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const CLAVE_AJUSTES = "comparador.adaptador";
 const CLAVE_HISTORIAL = "comparador.historial";
 const MAX_HISTORIAL = 30;
@@ -26,7 +28,9 @@ const dato = (v) => (v === null || v === undefined || v === "" ? "—" : esc(v))
 
 function mostrarVista(id) {
   for (const v of document.querySelectorAll(".vista")) v.hidden = v.id !== id;
-  for (const b of document.querySelectorAll(".nav")) b.classList.toggle("activo", b.dataset.vista === id);
+  // Simulación e inspección se abren desde la pantalla de inicio (pestaña Comparar).
+  const pestana = id === "vista-simulacion" || id === "vista-inspeccion" ? "vista-comparar" : id;
+  for (const b of document.querySelectorAll(".nav")) b.classList.toggle("activo", b.dataset.vista === pestana);
   if (id === "vista-historial") renderHistorial();
   window.scrollTo({ top: 0 });
 }
@@ -185,7 +189,7 @@ function valorConUnidad(p) {
   return esc(valor) + (p.unidad ? ` <span class="ayuda">${esc(p.unidad)}</span>` : "");
 }
 
-function renderResultados(r, entrada) {
+function renderResultados(r, entrada, destino = "#resultados", sufijo = "") {
   const { resultado, definiciones } = r;
   const emisiones =
     resultado.valores.filter((d) => d.emision).length +
@@ -230,7 +234,7 @@ function renderResultados(r, entrada) {
     ? `<ul class="lista">${resultado.errores.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>`
     : '<p class="ayuda">Sin errores de lectura.</p>';
 
-  $("#resultados").innerHTML = `
+  $(destino).innerHTML = `
     <div class="banner-no-verificado" role="status">
       <strong>Compatibilidad: NO VERIFICADA</strong>
       <p>Esta herramienta no determina compatibilidad entre calibraciones. Solo el fabricante puede confirmarla.</p>
@@ -265,18 +269,18 @@ function renderResultados(r, entrada) {
     <div class="ia-nota">No disponible en esta versión. La interpretación asistida requiere un servicio autorizado que aún no está configurado. No se muestra ninguna explicación generada.</div>
 
     <div class="fila-botones">
-      <button id="dl-md" type="button" class="secundario">Descargar Markdown</button>
-      <button id="dl-html" type="button" class="secundario">Descargar HTML</button>
+      <button id="dl-md${sufijo}" type="button" class="secundario">Descargar Markdown</button>
+      <button id="dl-html${sufijo}" type="button" class="secundario">Descargar HTML</button>
     </div>
     <p class="pie">A: ${esc(entrada.a.nombre)} · SHA-256 ${esc(entrada.a.sha256)}<br>
       B: ${esc(entrada.b.nombre)} · SHA-256 ${esc(entrada.b.sha256)}<br>
       Diccionario: ${esc(entrada.d.nombre)} · SHA-256 ${esc(entrada.d.sha256)}</p>`;
 
   const nombreBase = `reporte_${entrada.fecha.slice(0, 19).replace(/[:T]/g, "-")}`;
-  $("#dl-md").addEventListener("click", () => descargar(`${nombreBase}.md`, entrada.markdown, "text/markdown"));
-  $("#dl-html").addEventListener("click", () =>
+  $(`#dl-md${sufijo}`).addEventListener("click", () => descargar(`${nombreBase}.md`, entrada.markdown, "text/markdown"));
+  $(`#dl-html${sufijo}`).addEventListener("click", () =>
     descargar(`${nombreBase}.html`, htmlDocumento(entrada.markdown, "Reporte de comparación"), "text/html"));
-  $("#resultados").scrollIntoView({ behavior: "smooth", block: "start" });
+  $(destino).scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function descargar(nombre, contenido, tipo) {
@@ -349,6 +353,155 @@ function verHistorial(id) {
   $("#detalle-historial").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// ---------- Pantalla de inicio: tres opciones ----------
+
+function abrirOpcion(accion) {
+  if (accion === "simulacion") return mostrarVista("vista-simulacion");
+  if (accion === "inspeccionar") return mostrarVista("vista-inspeccion");
+  mostrarVista("vista-comparar");
+  $("#analizar").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---------- Simulación (Cummins X15 — DEMO) ----------
+
+async function leerDemo(nombre) {
+  const resp = await fetch(`ejemplo/demo/${nombre}`);
+  if (!resp.ok) throw new Error(`no se encontró ${nombre}`);
+  return new Uint8Array(await resp.arrayBuffer());
+}
+
+async function iniciarSimulacion() {
+  const error = $("#error-simulacion");
+  error.hidden = true;
+  $("#resultado-simulacion").innerHTML = "";
+  try {
+    const r = await ejecutarSimulacion(leerDemo);
+    const entrada = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      fecha: new Date().toISOString(),
+      a: { nombre: "SIMULACIÓN demo_a.csv", sha256: r.hashes.a },
+      b: { nombre: "SIMULACIÓN demo_b.csv", sha256: r.hashes.b },
+      d: { nombre: "SIMULACIÓN demo_diccionario.csv", sha256: r.hashes.diccionario },
+      cambios: r.resultado.valores.length,
+      noComparables: r.resultado.noComparables.length,
+      errores: r.resultado.errores.length,
+      markdown: r.markdown,
+      simulacion: true,
+    };
+    guardarEnHistorial(entrada);
+    const bloque = `
+      <h2>Explicación demostrativa</h2>
+      <div class="tarjeta">
+        <p class="ayuda">${esc(EXPLICACION_DEMOSTRATIVA[0])}</p>
+        <ul class="lista">${EXPLICACION_DEMOSTRATIVA.slice(1).map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
+      </div>
+      <h2>Resultados deterministas</h2>
+      <div id="sim-tabla"></div>`;
+    $("#resultado-simulacion").innerHTML = bloque;
+    renderResultados(r, entrada, "#sim-tabla", "-sim");
+  } catch (err) {
+    error.textContent = `No se pudo ejecutar la simulación: ${err.message}`;
+    error.hidden = false;
+  }
+}
+
+// ---------- Inspección estructural ----------
+
+let ultimaInspeccion = null;
+
+const chip = (t) => `<span class="estado">${esc(t)}</span>`;
+
+function renderInspeccion(ins) {
+  const cont = $("#resultado-inspeccion");
+  if (ins.error) {
+    cont.innerHTML = `
+      <div class="ia-nota">${esc(LEYENDA_INSPECCION)}</div>
+      <div class="error">${esc(ins.error)}</div>
+      <p class="ayuda">No se muestra ningún dato del archivo porque no pudo leerse como texto tabular.</p>`;
+    return;
+  }
+  const cod = ins.codificacion;
+  const delimNombre = { ",": "coma", ";": "punto y coma", "\t": "tabulador", "|": "barra vertical" }[ins.delimitador] ?? "no identificado";
+  const lista = (items, vacio) =>
+    items.length ? items.map((t) => `<li>${t}</li>`).join("") : `<li>${esc(vacio)}</li>`;
+
+  cont.innerHTML = `
+    <div class="ia-nota">${esc(LEYENDA_INSPECCION)}</div>
+    <div class="resumen">
+      <div class="kpi"><b>${esc(ins.filas)}</b><span>registros</span></div>
+      <div class="kpi"><b>${esc(ins.columnas)}</b><span>columnas</span></div>
+      <div class="kpi"><b>${esc(ins.malformados.length)}</b><span>mal formados</span></div>
+      <div class="kpi"><b>${esc(ins.filasRepetidas.length)}</b><span>filas repetidas</span></div>
+    </div>
+
+    <h2>Archivo</h2>
+    <div class="tarjeta">
+      <div class="fila-dato"><strong>Nombre</strong><span>${esc(ins.nombre)}</span></div>
+      <div class="fila-dato"><strong>Tamaño</strong><span>${esc(ins.bytes.toLocaleString("es-MX"))} bytes</span></div>
+      <div class="fila-dato"><strong>Codificación</strong><span>${esc(cod.codificacion)} ${chip(cod.confianza)}<br><span class="meta">${esc(cod.motivo)}</span></span></div>
+      <div class="fila-dato"><strong>Delimitador</strong><span>${esc(delimNombre)}${ins.delimitador ? ` <span class="meta">consistencia ${esc(Math.round(ins.consistenciaDelimitador * 100))}%</span>` : " <span class=\"chip-alerta\">revisar</span>"}</span></div>
+      <div class="fila-dato"><strong>SHA-256</strong><span class="meta" style="word-break:break-all">${esc(ins.sha256)}</span></div>
+      <div class="fila-dato"><strong>Pista de procedencia</strong><span>${ins.pistaNombre
+        ? "El nombre coincide con la convención de INSITE. Esto es solo una pista; no confirma el origen."
+        : "El nombre no coincide con la convención de INSITE. No confirma ni descarta su origen."}</span></div>
+    </div>
+
+    <h2>Encabezados</h2>
+    <div class="tarjeta"><ol class="lista">${ins.encabezados.map((h) => `<li>${h === "" ? "<em>(vacío)</em>" : esc(h)}</li>`).join("")}</ol></div>
+
+    <h2>Campos vacíos por columna</h2>
+    <div class="tarjeta"><ul class="lista">${ins.vaciosPorColumna.map((c) => `<li>${esc(c.nombre || "(vacío)")}: ${esc(c.vacios)}</li>`).join("")}</ul></div>
+
+    <h2>Errores de estructura</h2>
+    <div class="tarjeta"><ul class="lista">
+      ${lista(ins.malformados.slice(0, 20).map((m) => `Línea ${esc(m.linea)}: ${esc(m.campos)} campos (encabezado: ${esc(ins.columnas)})`), "Ningún registro con número de campos distinto al encabezado.")}
+      ${lista(ins.filasRepetidas.slice(0, 20).map((f) => `Línea ${esc(f.linea)} repite la línea ${esc(f.primeraLinea)}`), "Sin filas repetidas.")}
+      ${lista(ins.encabezadosRepetidos.map((h) => `Encabezado repetido: ${esc(h.nombre || "(vacío)")} ×${esc(h.veces)}`), "Sin encabezados repetidos.")}
+    </ul></div>
+
+    ${ins.avisos.length ? `<h2>Avisos</h2><div class="tarjeta"><ul class="lista">${ins.avisos.map((a) => `<li>${esc(a)}</li>`).join("")}</ul></div>` : ""}
+
+    <h2>Vista previa (primeros registros)</h2>
+    <p class="ayuda">Solo para revisar la forma del archivo. Las celdas se recortan y no se interpretan.</p>
+    <div class="tabla-scroll"><table class="tabla-simple"><tbody>
+      ${ins.vistaPrevia.map((fila, i) => `<tr class="${i === 0 ? "cabecera" : ""}">${fila.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}
+    </tbody></table></div>
+
+    <div class="fila-botones">
+      <button id="ins-md" type="button" class="secundario">Descargar reporte (Markdown)</button>
+      <button id="ins-html" type="button" class="secundario">Descargar reporte (HTML)</button>
+    </div>
+    <p class="pie">El reporte no incluye valores, vista previa ni el nombre del archivo.</p>`;
+
+  const base = `inspeccion_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}`;
+  const md = reporteEstructural(ins);
+  $("#ins-md").addEventListener("click", () => descargar(`${base}.md`, md, "text/markdown"));
+  $("#ins-html").addEventListener("click", () =>
+    descargar(`${base}.html`, htmlDocumento(md, "Inspección estructural de archivo CSV"), "text/html"));
+  cont.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function inspeccionarArchivo() {
+  const error = $("#error-inspeccion");
+  error.hidden = true;
+  $("#resultado-inspeccion").innerHTML = "";
+  const f = $("#fi").files[0];
+  if (!f) {
+    error.textContent = "Seleccione un archivo CSV para inspeccionar.";
+    error.hidden = false;
+    return;
+  }
+  try {
+    const bytes = await leerArchivo(f);
+    const sha = await sha256Hex(bytes);
+    ultimaInspeccion = inspeccionar({ bytes, nombre: f.name, sha256: sha });
+    renderInspeccion(ultimaInspeccion);
+  } catch (err) {
+    error.textContent = `No se pudo leer el archivo: ${err.message}`;
+    error.hidden = false;
+  }
+}
+
 // ---------- Arranque ----------
 
 function init() {
@@ -364,6 +517,12 @@ function init() {
   $("#fb").addEventListener("change", () => mostrarNombre($("#fb"), "#nombre-b"));
   $("#fd").addEventListener("change", () => mostrarNombre($("#fd"), "#nombre-d"));
   $("#btn-comparar").addEventListener("click", comparar);
+  for (const b of document.querySelectorAll(".opcion")) {
+    b.addEventListener("click", () => abrirOpcion(b.dataset.accion));
+  }
+  $("#btn-simular").addEventListener("click", iniciarSimulacion);
+  $("#fi").addEventListener("change", () => mostrarNombre($("#fi"), "#nombre-i"));
+  $("#btn-inspeccionar").addEventListener("click", inspeccionarArchivo);
   $("#lista-historial").addEventListener("click", (e) => {
     const b = e.target.closest("[data-id]");
     if (b) verHistorial(b.dataset.id);

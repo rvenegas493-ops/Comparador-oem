@@ -291,3 +291,45 @@ button.peligro { border-color: var(--rojo); color: var(--rojo); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* Pantalla de inicio: tres opciones claras */
+.opciones { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 4px 0 8px; }
+.opcion {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-height: 72px;
+  text-align: left;
+  background: var(--tarjeta);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-left: 5px solid var(--azul);
+  padding: 12px 14px;
+}
+.opcion strong { font-size: 18px; color: var(--azul); }
+.opcion span { font-size: 14px; color: var(--texto-suave); font-weight: 400; }
+.opcion:focus-visible { outline: 3px solid var(--ambar); outline-offset: 2px; }
+
+/* Simulación: leyenda visible y separada de los resultados */
+.aviso-simulacion {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--rojo-fondo);
+  border: 2px solid var(--rojo);
+  color: #611a16;
+  border-radius: var(--radio);
+  padding: 12px 14px;
+  margin: 12px 0;
+  font-size: 14px;
+}
+.aviso-simulacion strong { font-size: 16px; }
+
+/* Inspección: tablas anchas con desplazamiento horizontal contenido */
+.tabla-scroll { overflow-x: auto; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--tarjeta); }
+.tabla-simple { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+.tabla-simple td { border-bottom: 1px solid var(--borde); padding: 6px 8px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.tabla-simple tr.cabecera td { font-weight: 700; background: var(--azul-claro); color: var(--azul); }
+.fila-dato span { word-break: break-word; }

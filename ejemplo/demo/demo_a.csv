@@ -1,0 +1,14 @@
+tipo,nombre,valor,unidad
+meta,ecm_id,DEMO-ECM-0001,
+meta,engine,X15 DEMO,
+meta,cal_id,DEMO-CAL-A,
+meta,sw_version,DEMO-1.0.0,
+param,DEMO_REGIMEN_RALENTI,650,rpm
+param,DEMO_LIMITE_PAR,2100,Nm
+param,DEMO_LIMITE_PAR,2150,Nm
+param,DEMO_PRESION_RIEL,1800,bar
+param,DEMO_AVANCE_INYECCION,8.5,grados
+param,DEMO_CAUDAL_COMBUSTIBLE,,l/h
+param,DEMO_ALTURA_ASIENTO,25,mm
+param,DEMO_SOLO_A,1,
+param,DEMO_DEF_DOSIFICACION,40,%

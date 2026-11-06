@@ -23,11 +23,28 @@
 
   <main>
     <!-- COMPARAR -->
-    <section id="vista-comparar" class="vista activa" aria-label="Comparar">
+    <section id="vista-comparar" class="vista activa" aria-label="Inicio">
       <div class="aviso-lectura">
         <strong>Solo lectura.</strong> No modifica archivos ni ECM. Use únicamente exportaciones autorizadas.
         <span class="chip-alerta">Compatibilidad: no verificada</span>
       </div>
+
+      <nav class="opciones" aria-label="Opciones principales">
+        <button class="opcion" type="button" data-accion="simulacion">
+          <strong>Iniciar simulación</strong>
+          <span>Pruebe la herramienta con un Cummins X15 ficticio. No necesita camión ni INSITE.</span>
+        </button>
+        <button class="opcion" type="button" data-accion="analizar">
+          <strong>Analizar archivos</strong>
+          <span>Compare dos exportaciones con su diccionario de definiciones.</span>
+        </button>
+        <button class="opcion" type="button" data-accion="inspeccionar">
+          <strong>Inspeccionar archivo</strong>
+          <span>Revise la estructura de un CSV desconocido antes de interpretarlo.</span>
+        </button>
+      </nav>
+
+      <h2 id="analizar">Analizar archivos</h2>
 
       <div class="tarjeta">
         <label class="etiqueta" for="fa">1. Exportación A</label>
@@ -54,6 +71,33 @@
       <button id="btn-comparar" class="primario" type="button">Comparar</button>
       <div id="error" class="error" role="alert" hidden></div>
       <div id="resultados"></div>
+    </section>
+
+    <!-- SIMULACIÓN -->
+    <section id="vista-simulacion" class="vista" aria-label="Simulación" hidden>
+      <h2>Simulación</h2>
+      <div class="aviso-simulacion" role="note">
+        <strong>SIMULACIÓN — NO VÁLIDA PARA DIAGNÓSTICO</strong>
+        <span>Cummins X15 — DEMO. Identificadores y parámetros inventados; no son información oficial de Cummins.</span>
+      </div>
+      <p class="ayuda">Usa el mismo motor de comparación que sus archivos. Funciona sin conexión.</p>
+      <button id="btn-simular" class="primario" type="button">Iniciar simulación</button>
+      <div id="error-simulacion" class="error" role="alert" hidden></div>
+      <div id="resultado-simulacion"></div>
+    </section>
+
+    <!-- INSPECCIÓN -->
+    <section id="vista-inspeccion" class="vista" aria-label="Inspeccionar archivo" hidden>
+      <h2>Inspeccionar archivo</h2>
+      <p class="ayuda">Revise un CSV sin conocer su formato. Solo se examina la estructura: no se interpretan parámetros ni se emiten conclusiones técnicas. El archivo no se modifica ni se envía a ningún servidor.</p>
+      <div class="tarjeta">
+        <label class="etiqueta" for="fi">Archivo CSV</label>
+        <input type="file" id="fi" accept=".csv,text/csv,text/plain">
+        <p class="nombre-archivo" id="nombre-i"></p>
+      </div>
+      <button id="btn-inspeccionar" class="primario" type="button">Inspeccionar</button>
+      <div id="error-inspeccion" class="error" role="alert" hidden></div>
+      <div id="resultado-inspeccion"></div>
     </section>
 
     <!-- HISTORIAL -->
@@ -99,12 +143,14 @@
         <p><strong>Qué hace:</strong> compara dos exportaciones CSV de configuración y un diccionario de definiciones. Muestra diferencias, datos no comparables, errores y trazabilidad a línea y archivo.</p>
         <p><strong>Qué no hace:</strong> no modifica archivos, no programa ECM, no determina compatibilidad y no interpreta parámetros de emisiones.</p>
         <p><strong>Sin conexión:</strong> funciona completamente offline después de la primera carga. Los datos no se envían a ningún servidor.</p>
-        <p><strong>Versión:</strong> <span id="version">1.0.0</span></p>
+        <p><strong>Versión:</strong> <span id="version">1.1.0</span></p>
       </div>
       <h2>Limitaciones conocidas</h2>
       <ul class="lista">
         <li>Interpretación con IA: no disponible en esta versión.</li>
-        <li>Codificaciones: solo UTF-8 y UTF-8 con BOM.</li>
+        <li>Comparación: solo acepta UTF-8 y UTF-8 con BOM. La inspección estructural detecta además UTF-16 y Windows-1252, de forma tentativa.</li>
+        <li>Simulación: datos ficticios; no son información oficial de Cummins ni sirven para diagnóstico.</li>
+        <li>Inspección: no interpreta valores. No confirma el origen de un archivo por su nombre.</li>
         <li>La definición de cada parámetro proviene de su diccionario; la herramienta no verifica su autenticidad.</li>
         <li>La revisión de emisiones se basa en el nombre del parámetro.</li>
       </ul>

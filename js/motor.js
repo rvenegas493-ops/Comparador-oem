@@ -5,7 +5,7 @@
 
 export class LecturaError extends Error {}
 export class ConfigError extends Error {}
-class ComillaSinCerrar extends Error {}
+export class ComillaSinCerrar extends Error {}
 
 export const COMPATIBILIDAD = "no verificada";
 const CAMPOS_META = ["ecm_id", "engine", "cal_id", "sw_version"];
