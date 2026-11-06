@@ -1,0 +1,6 @@
+nombre,definicion,fuente
+PARAM_RALENTI,Velocidad objetivo de ralentí,Documento ficticio de ejemplo §1
+PARAM_LIMITE_PAR,Límite de par del motor,Documento ficticio de ejemplo §2
+DEF_TASA_DOSIFICACION_EJEMPLO,Tasa de dosificación de ejemplo (dato ficticio),Documento ficticio de ejemplo §3
+PARAM_RETIRADO,Parámetro retirado en versiones posteriores,Documento ficticio de ejemplo §4
+PARAM_NUEVO,Parámetro nuevo en la versión B,Documento ficticio de ejemplo §5

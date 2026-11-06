@@ -1,0 +1,10 @@
+tipo,nombre,valor,unidad
+meta,ecm_id,ECM-EJEMPLO-001,
+meta,engine,MOTOR-EJEMPLO-X,
+meta,cal_id,CAL-0002,
+meta,sw_version,1.0.1,
+param,PARAM_RALENTI,800,rpm
+param,PARAM_LIMITE_PAR,1800,Nm
+param,DEF_TASA_DOSIFICACION_EJEMPLO,14,mg/s
+param,PARAM_VALOR_SIN_DEFINICION,7,
+param,PARAM_NUEVO,3,

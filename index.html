@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f3b57">
+  <meta name="application-name" content="Comparador OEM">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Comparador OEM">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Comparación de solo lectura de exportaciones de configuración. Sin conexión.">
+  <title>Comparador OEM</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="barra">
+    <h1>Comparador OEM</h1>
+    <span id="estado-red" class="pastilla" aria-live="polite">Sin conexión</span>
+  </header>
+
+  <main>
+    <!-- COMPARAR -->
+    <section id="vista-comparar" class="vista activa" aria-label="Comparar">
+      <div class="aviso-lectura">
+        <strong>Solo lectura.</strong> No modifica archivos ni ECM. Use únicamente exportaciones autorizadas.
+        <span class="chip-alerta">Compatibilidad: no verificada</span>
+      </div>
+
+      <div class="tarjeta">
+        <label class="etiqueta" for="fa">1. Exportación A</label>
+        <input type="file" id="fa" accept=".csv,text/csv,text/plain">
+        <p class="nombre-archivo" id="nombre-a"></p>
+      </div>
+
+      <div class="tarjeta">
+        <label class="etiqueta" for="fb">2. Exportación B</label>
+        <input type="file" id="fb" accept=".csv,text/csv,text/plain">
+        <p class="nombre-archivo" id="nombre-b"></p>
+      </div>
+
+      <div class="tarjeta">
+        <label class="etiqueta" for="fd">3. Diccionario de definiciones</label>
+        <input type="file" id="fd" accept=".csv,text/csv,text/plain">
+        <p class="nombre-archivo" id="nombre-d"></p>
+        <label class="casilla">
+          <input type="checkbox" id="usar-ejemplo">
+          Usar diccionario de ejemplo (datos ficticios)
+        </label>
+      </div>
+
+      <button id="btn-comparar" class="primario" type="button">Comparar</button>
+      <div id="error" class="error" role="alert" hidden></div>
+      <div id="resultados"></div>
+    </section>
+
+    <!-- HISTORIAL -->
+    <section id="vista-historial" class="vista" aria-label="Historial" hidden>
+      <div class="cabecera-seccion">
+        <h2>Historial</h2>
+        <button id="btn-borrar-historial" class="secundario" type="button">Borrar todo</button>
+      </div>
+      <p class="ayuda">Guardado en este dispositivo. Se conservan los últimos 30 reportes.</p>
+      <div id="lista-historial"></div>
+      <div id="detalle-historial"></div>
+    </section>
+
+    <!-- AJUSTES -->
+    <section id="vista-ajustes" class="vista" aria-label="Ajustes" hidden>
+      <h2>Formato de las exportaciones</h2>
+      <p class="ayuda">Configure estos valores para que coincidan con el formato de sus exportaciones. Los valores por defecto corresponden a un CSV genérico.</p>
+      <form id="form-ajustes" class="tarjeta">
+        <label class="campo">Delimitador
+          <select id="a-delimitador"><option value=",">Coma ,</option><option value=";">Punto y coma ;</option></select>
+        </label>
+        <label class="campo">Codificación
+          <select id="a-codificacion"><option value="utf-8-sig">UTF-8 con BOM</option><option value="utf-8">UTF-8</option></select>
+        </label>
+        <label class="campo">Columna de tipo <input id="a-col_tipo" type="text" autocomplete="off"></label>
+        <label class="campo">Columna de nombre <input id="a-col_nombre" type="text" autocomplete="off"></label>
+        <label class="campo">Columna de valor <input id="a-col_valor" type="text" autocomplete="off"></label>
+        <label class="campo">Columna de unidad <input id="a-col_unidad" type="text" autocomplete="off"></label>
+        <label class="campo">Valor de fila meta <input id="a-tipo_meta" type="text" autocomplete="off"></label>
+        <label class="campo">Valor de fila parámetro <input id="a-tipo_param" type="text" autocomplete="off"></label>
+        <div class="fila-botones">
+          <button type="submit" class="primario">Guardar</button>
+          <button id="btn-restaurar" type="button" class="secundario">Restaurar valores por defecto</button>
+        </div>
+        <p id="estado-ajustes" class="ayuda" role="status"></p>
+      </form>
+    </section>
+
+    <!-- ACERCA -->
+    <section id="vista-acerca" class="vista" aria-label="Acerca de" hidden>
+      <h2>Acerca de esta aplicación</h2>
+      <div class="tarjeta">
+        <p><strong>Qué hace:</strong> compara dos exportaciones CSV de configuración y un diccionario de definiciones. Muestra diferencias, datos no comparables, errores y trazabilidad a línea y archivo.</p>
+        <p><strong>Qué no hace:</strong> no modifica archivos, no programa ECM, no determina compatibilidad y no interpreta parámetros de emisiones.</p>
+        <p><strong>Sin conexión:</strong> funciona completamente offline después de la primera carga. Los datos no se envían a ningún servidor.</p>
+        <p><strong>Versión:</strong> <span id="version">1.0.0</span></p>
+      </div>
+      <h2>Limitaciones conocidas</h2>
+      <ul class="lista">
+        <li>Interpretación con IA: no disponible en esta versión.</li>
+        <li>Codificaciones: solo UTF-8 y UTF-8 con BOM.</li>
+        <li>La definición de cada parámetro proviene de su diccionario; la herramienta no verifica su autenticidad.</li>
+        <li>La revisión de emisiones se basa en el nombre del parámetro.</li>
+      </ul>
+    </section>
+  </main>
+
+  <nav class="inferior" aria-label="Navegación">
+    <button class="nav activo" data-vista="vista-comparar" type="button">Comparar</button>
+    <button class="nav" data-vista="vista-historial" type="button">Historial</button>
+    <button class="nav" data-vista="vista-ajustes" type="button">Ajustes</button>
+    <button class="nav" data-vista="vista-acerca" type="button">Acerca</button>
+  </nav>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
