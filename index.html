@@ -134,6 +134,22 @@
         </div>
         <p id="estado-ajustes" class="ayuda" role="status"></p>
       </form>
+
+      <h2>Interpretación asistida por IA</h2>
+      <p class="ayuda">Opcional. Indique la dirección del servicio autorizado y su token de acceso. El token es revocable y no es una clave del proveedor de IA. Se guarda solo en este dispositivo. Si lo deja vacío, la IA queda desactivada.</p>
+      <form id="form-ia" class="tarjeta">
+        <label class="campo">Dirección del servicio (HTTPS)
+          <input id="ia-url" type="url" inputmode="url" autocomplete="off" placeholder="https://…">
+        </label>
+        <label class="campo">Token de acceso
+          <input id="ia-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <div class="fila-botones">
+          <button type="submit" class="primario">Guardar</button>
+          <button id="btn-borrar-ia" type="button" class="secundario">Borrar configuración de IA</button>
+        </div>
+        <p id="estado-ia" class="ayuda" role="status"></p>
+      </form>
     </section>
 
     <!-- ACERCA -->
@@ -143,11 +159,11 @@
         <p><strong>Qué hace:</strong> compara dos exportaciones CSV de configuración y un diccionario de definiciones. Muestra diferencias, datos no comparables, errores y trazabilidad a línea y archivo.</p>
         <p><strong>Qué no hace:</strong> no modifica archivos, no programa ECM, no determina compatibilidad y no interpreta parámetros de emisiones.</p>
         <p><strong>Sin conexión:</strong> funciona completamente offline después de la primera carga. Los datos no se envían a ningún servidor.</p>
-        <p><strong>Versión:</strong> <span id="version">1.2.0</span></p>
+        <p><strong>Versión:</strong> <span id="version">1.3.0</span></p>
       </div>
       <h2>Limitaciones conocidas</h2>
       <ul class="lista">
-        <li>Interpretación con IA: no disponible en esta versión.</li>
+        <li>Interpretación con IA: opcional y solo activa con un servicio autorizado configurado en Ajustes. Solo explica diferencias documentadas; la validación técnica sigue siendo necesaria. El registro documental incluido es ficticio (DEMO).</li>
         <li>Comparación: solo acepta UTF-8 y UTF-8 con BOM. La inspección estructural detecta además UTF-16 y Windows-1252, de forma tentativa.</li>
         <li>Simulación: datos ficticios; no son información oficial de Cummins ni sirven para diagnóstico.</li>
         <li>Inspección: no interpreta valores. No confirma el origen de un archivo por su nombre.</li>

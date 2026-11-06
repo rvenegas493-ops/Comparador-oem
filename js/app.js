@@ -6,8 +6,15 @@ import { mdToHtml, htmlDocumento } from "./markdown.js";
 import { construirResumen } from "./resumen.js";
 import { inspeccionar, reporteEstructural, LEYENDA_INSPECCION } from "./inspeccion.js";
 import { ejecutarSimulacion, LEYENDA_SIMULACION, EXPLICACION_DEMOSTRATIVA } from "./simulacion.js";
+import { construirSolicitud, validarRegistro } from "./ia-validacion.js";
+import {
+  leerConfiguracionIA, guardarConfiguracionIA, borrarConfiguracionIA,
+  iaDisponible, resumenEnvio, consultarIA,
+} from "./ia-cliente.js";
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
+const RUTA_REGISTRO_IA = "ejemplo/documentos-demo/documentos.json";
+let registroIA = null;
 const CLAVE_AJUSTES = "comparador.adaptador";
 const CLAVE_HISTORIAL = "comparador.historial";
 const MAX_HISTORIAL = 30;
@@ -87,6 +94,28 @@ function restaurarAjustes() {
   localStorage.removeItem(CLAVE_AJUSTES);
   cargarFormularioAjustes();
   $("#estado-ajustes").textContent = "Valores por defecto restaurados.";
+}
+
+// ---------- Ajustes de IA (URL del servicio y token de acceso) ----------
+
+function cargarFormularioIA() {
+  const c = leerConfiguracionIA();
+  $("#ia-url").value = c.url;
+  $("#ia-token").value = c.token;
+}
+
+function guardarFormularioIA(e) {
+  e.preventDefault();
+  const r = guardarConfiguracionIA({ url: $("#ia-url").value, token: $("#ia-token").value });
+  $("#estado-ia").textContent = r.ok
+    ? "Configuración de IA guardada en este dispositivo."
+    : `No se guardó: ${r.error}`;
+}
+
+function limpiarFormularioIA() {
+  borrarConfiguracionIA();
+  cargarFormularioIA();
+  $("#estado-ia").textContent = "Configuración de IA borrada de este dispositivo.";
 }
 
 // ---------- Archivos y huellas ----------
@@ -314,18 +343,133 @@ function renderResultados(r, entrada, destino = "#resultados", sufijo = "") {
         <div class="tarjeta">${errores}</div>
 
         <h2>7. Interpretación asistida por IA</h2>
-        <div class="ia-nota">No disponible en esta versión. La interpretación asistida requiere un servicio autorizado que aún no está configurado. No se muestra ninguna explicación generada.</div>
+        <div class="ia-nota">La interpretación asistida, si se solicita, se muestra en la pantalla de resultados. No forma parte del reporte descargable, que contiene solo datos deterministas.</div>
         <p class="pie">A: ${esc(entrada.a.nombre)} · SHA-256 ${esc(entrada.a.sha256)}<br>
           B: ${esc(entrada.b.nombre)} · SHA-256 ${esc(entrada.b.sha256)}<br>
           Diccionario: ${esc(entrada.d.nombre)} · SHA-256 ${esc(entrada.d.sha256)}</p>
       </div>
     </details>`;
 
+  if (sufijo === "") montarBloqueIA(r);
+
   const nombreBase = `reporte_${entrada.fecha.slice(0, 19).replace(/[:T]/g, "-")}`;
   $(`#dl-md${sufijo}`).addEventListener("click", () => descargar(`${nombreBase}.md`, entrada.markdown, "text/markdown"));
   $(`#dl-html${sufijo}`).addEventListener("click", () =>
     descargar(`${nombreBase}.html`, htmlDocumento(entrada.markdown, "Reporte de comparación"), "text/html"));
   $(destino).scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---------- Interpretación asistida por IA (solo comparación, nunca simulación) ----------
+
+// Bloque que aparece debajo del resumen. Sin configuración el botón queda deshabilitado.
+function montarBloqueIA(r) {
+  const cont = $("#resultados");
+  const bloque = document.createElement("section");
+  bloque.className = "bloque-ia";
+  bloque.innerHTML = `
+    <h2>Interpretación asistida por IA (opcional)</h2>
+    <div class="tarjeta">
+      <p class="ayuda">La IA solo explica diferencias que tienen documentación citada. Toda explicación requiere validación técnica humana.</p>
+      <p id="ia-estado" class="ayuda" role="status"></p>
+      <button id="btn-ia" type="button" class="primario">Explicar diferencias con IA</button>
+      <div id="ia-resultado"></div>
+    </div>`;
+  cont.appendChild(bloque);
+
+  const config = leerConfiguracionIA();
+  const disponible = iaDisponible(config, navigator.onLine);
+  $("#btn-ia").disabled = !disponible;
+  $("#ia-estado").textContent = disponible
+    ? "Servicio configurado. Antes de enviar se le mostrará exactamente qué información se enviará."
+    : config.url
+      ? "El servicio no está disponible: revise la conexión y el token en Ajustes."
+      : "Servicio no configurado. Puede configurarlo en Ajustes; mientras tanto, el comparador funciona sin IA.";
+  $("#btn-ia").addEventListener("click", () => explicarConIA(r));
+}
+
+async function cargarRegistroIA() {
+  if (registroIA) return registroIA;
+  const resp = await fetch(RUTA_REGISTRO_IA);
+  if (!resp.ok) throw new Error("no se encontró el registro documental");
+  const reg = await resp.json();
+  const problemas = validarRegistro(reg);
+  if (problemas.length) throw new Error("el registro documental no es coherente");
+  registroIA = reg;
+  return reg;
+}
+
+async function explicarConIA(r) {
+  const salida = $("#ia-resultado");
+  const boton = $("#btn-ia");
+  const config = leerConfiguracionIA();
+  let registro;
+  try {
+    registro = await cargarRegistroIA();
+  } catch (err) {
+    salida.innerHTML = `<div class="error">No se pudo preparar la interpretación: ${esc(err.message)}</div>`;
+    return;
+  }
+
+  const { items, noDeterminables } = construirSolicitud(r.resultado, registro);
+  if (items.length === 0) {
+    salida.innerHTML = `<div class="tarjeta"><p class="ayuda">No hay diferencias de valor con documentación en el registro. No se envió nada.</p>
+      ${noDeterminables.length ? `<ul class="lista">${noDeterminables.map((n) => `<li>${esc(n.nombre)}: ${esc(n.motivo)}</li>`).join("")}</ul>` : ""}</div>`;
+    return;
+  }
+
+  // Confirmación explícita: el usuario ve exactamente lo que sale del dispositivo.
+  const solicitud = { items };
+  if (!confirm(`${resumenEnvio(solicitud)}\n\n¿Enviar esta información?`)) {
+    salida.innerHTML = '<p class="ayuda">Envío cancelado. No se envió nada.</p>';
+    return;
+  }
+
+  boton.disabled = true;
+  salida.innerHTML = '<p class="ayuda">Consultando el servicio…</p>';
+  const resp = await consultarIA({ solicitud, items, registro, config });
+  boton.disabled = false;
+  if (!resp.ok) {
+    salida.innerHTML = `<div class="error">${esc(resp.error)}</div>`;
+    return;
+  }
+  salida.innerHTML = renderIA(resp, noDeterminables, r);
+}
+
+function renderIA(resp, noDeterminables, r) {
+  const datos = construirResumen(r.resultado).hallazgos;
+  const validadas = resp.items.filter((i) => i.estado === "validada");
+  const noDet = [
+    ...noDeterminables.map((n) => ({ nombre: n.nombre, motivo: n.motivo })),
+    ...resp.items.filter((i) => i.estado !== "validada").map((i) => ({ nombre: i.nombre, motivo: i.motivo })),
+  ];
+
+  return `
+    <div class="ia-bloque comprobado">
+      <h3>Datos comprobados por el comparador</h3>
+      <p class="ayuda">Obtenidos directamente de los archivos. No son interpretación.</p>
+      <ul class="lista">${datos.map((h) => `<li>${esc(h.texto)}</li>`).join("")}</ul>
+    </div>
+
+    <div class="ia-bloque interpretacion">
+      <h3>Interpretación de IA <span class="estado">requiere validación técnica</span></h3>
+      ${validadas.length ? validadas.map((v) => `
+        <article class="ia-explicacion">
+          <p>${esc(v.texto)}</p>
+          <p class="fuentes"><b>Fuentes:</b> ${v.fuentes.map((f) =>
+            `${esc(f.doc)} ${esc(f.version)} · sección ${esc(f.seccion)} · ${esc(f.fuente)}`).join("; ")}</p>
+          <p class="alerta-ia">Requiere validación técnica antes de cualquier decisión.</p>
+        </article>`).join("")
+        : '<p class="ayuda">Ninguna explicación superó la validación automática.</p>'}
+    </div>
+
+    <div class="ia-bloque no-determinable">
+      <h3>No determinable</h3>
+      ${noDet.length ? `<ul class="lista">${noDet.map((n) => `<li><b>${esc(n.nombre)}</b>: ${esc(n.motivo)}</li>`).join("")}</ul>`
+        : '<p class="ayuda">Ningún parámetro quedó sin determinar.</p>'}
+      ${resp.descartados ? `<p class="ayuda">${resp.descartados} respuesta(s) del modelo se descartaron por no superar la validación.</p>` : ""}
+    </div>
+
+    <p class="pie">Modelo: ${esc(resp.modelo ?? "—")} · Huella de la solicitud: ${esc(resp.huella ?? "—")} · ${esc(resp.generado ?? "")}</p>`;
 }
 
 function descargar(nombre, contenido, tipo) {
@@ -580,8 +724,11 @@ function init() {
   });
   $("#form-ajustes").addEventListener("submit", guardarAjustes);
   $("#btn-restaurar").addEventListener("click", restaurarAjustes);
+  $("#form-ia").addEventListener("submit", guardarFormularioIA);
+  $("#btn-borrar-ia").addEventListener("click", limpiarFormularioIA);
 
   cargarFormularioAjustes();
+  cargarFormularioIA();
   renderHistorial();
 
   if ("serviceWorker" in navigator) {

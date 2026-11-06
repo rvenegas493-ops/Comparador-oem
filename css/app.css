@@ -380,3 +380,42 @@ button.peligro { border-color: var(--rojo); color: var(--rojo); }
 @media (min-width: 640px) {
   .datos-resumen { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ---------- Interpretación asistida por IA (opcional) ----------
+   Tres bloques visualmente separados: datos comprobados, interpretación y no determinable. */
+.bloque-ia { margin-top: 24px; }
+.ia-bloque {
+  border-left: 6px solid var(--borde);
+  border-radius: var(--radio);
+  padding: 14px 16px;
+  margin: 14px 0;
+  background: var(--tarjeta);
+}
+.ia-bloque h3 { margin: 0 0 8px; font-size: 1.05rem; color: var(--azul); }
+.ia-bloque.comprobado { border-left-color: var(--azul); background: var(--azul-claro); }
+.ia-bloque.interpretacion { border-left-color: var(--ambar); background: var(--ambar-fondo); }
+.ia-bloque.no-determinable { border-left-color: var(--texto-suave); background: #eef1f4; }
+.ia-explicacion { border-top: 1px solid var(--borde); padding: 12px 0; }
+.ia-explicacion:first-of-type { border-top: 0; }
+.ia-explicacion p { margin: 6px 0; }
+.fuentes { font-size: 0.95rem; color: var(--texto-suave); }
+.alerta-ia {
+  display: inline-block;
+  font-weight: 700;
+  background: var(--ambar);
+  color: #000;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.ia-bloque .estado {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.8rem;
+  background: var(--ambar);
+  color: #000;
+  padding: 2px 8px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+#btn-ia { width: 100%; min-height: 48px; }
+#btn-ia:disabled { opacity: 0.55; cursor: not-allowed; }

@@ -1,0 +1,22 @@
+{
+  "aviso": "DOCUMENTACIÓN FICTICIA — DEMO. No es documentación de Cummins ni sirve para diagnóstico.",
+  "documentos": [
+    {
+      "id": "DEMO-DOC-01",
+      "version": "0.1",
+      "fuente": "Manual de demostración X15 (ficticio)",
+      "secciones": [
+        { "seccion": "2.1", "texto": "DEMO_REGIMEN_RALENTI indica el régimen de giro del motor en ralentí, expresado en rpm. Texto ficticio para demostración." },
+        { "seccion": "2.2", "texto": "DEMO_LIMITE_PAR indica el par máximo configurado, expresado en Nm. Texto ficticio para demostración." },
+        { "seccion": "3.1", "texto": "DEMO_PRESION_RIEL indica la presión del riel de combustible, expresada en bar. Texto ficticio para demostración." },
+        { "seccion": "3.2", "texto": "DEMO_AVANCE_INYECCION indica el avance de inyección, expresado en grados. Texto ficticio para demostración." }
+      ]
+    }
+  ],
+  "parametros": {
+    "DEMO_REGIMEN_RALENTI": [{ "doc": "DEMO-DOC-01", "seccion": "2.1" }],
+    "DEMO_LIMITE_PAR": [{ "doc": "DEMO-DOC-01", "seccion": "2.2" }],
+    "DEMO_PRESION_RIEL": [{ "doc": "DEMO-DOC-01", "seccion": "3.1" }],
+    "DEMO_AVANCE_INYECCION": [{ "doc": "DEMO-DOC-01", "seccion": "3.2" }]
+  }
+}
